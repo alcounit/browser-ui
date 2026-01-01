@@ -1,0 +1,226 @@
+:root {
+  --bg: #f5f5f7;
+  --surface: rgba(255, 255, 255, 0.88);
+  --surface-alt: rgba(255, 255, 255, 0.78);
+  --card-bg: rgba(255, 255, 255, 0.85);
+  --text: #1d1d1f;
+  --text-secondary: #666;
+  --border: rgba(0, 0, 0, 0.08);
+  --primary: #007aff;
+  --primary-hover: #0061cc;
+  --success: #30d158;
+  --disabled: #888;
+  --shadow-large: 0 20px 50px rgba(0, 0, 0, 0.12);
+  --transition: 0.38s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+#root {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Header */
+.app-header {
+  height: 64px;
+  background: var(--surface-alt);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  flex-shrink: 0;
+  z-index: 1000;
+  position: sticky;
+  top: 0;
+}
+
+.header-title {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.4px;
+}
+
+.header-stats {
+  margin-left: auto;
+  display: flex;
+  gap: 32px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.stat-item strong { color: var(--text); font-weight: 600; }
+
+/* Main Content */
+.main-content {
+  flex: 1;
+  padding: 32px 40px;
+  overflow-y: auto;
+}
+
+.container-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  gap: 22px;
+}
+
+/* Session Card */
+.browser-card {
+  background: var(--card-bg);
+  backdrop-filter: blur(20px);
+  border-radius: 16px;
+  padding: 20px 22px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.07);
+  border: 1px solid var(--border);
+  transition: all 0.25s ease;
+}
+.browser-card:hover:not(.disabled) {
+  transform: translateY(-4px);
+  box-shadow: 0 16px 32px rgba(0,0,0,0.12);
+}
+.browser-card.disabled {
+  opacity: 0.7;
+  cursor: default;
+  box-shadow: none;
+  transform: none;
+}
+
+.browser-id {
+  font-size: 12px;
+  color: #8d8d8d;
+}
+
+.browser-uuid {
+  font-size: 15px; font-weight: 700; letter-spacing: -0.2px;
+  color: var(--text); padding-bottom: 16px; margin: 0 0 16px;
+  border-bottom: 1px solid var(--border); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.browser-header-row { display: flex; gap: 14px; align-items: center; margin-bottom: 12px; }
+.browser-icon {
+  width: 44px; height: 44px; border-radius: 10px; background: #e5e5e5;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; font-weight: 600; flex-shrink: 0;
+}
+.browser-name { font-weight: 600; font-size: 16px; }
+.browser-version { color: var(--text-secondary); font-size: 13px; }
+.browser-details { margin-top: 12px; font-size: 14px; line-height: 1.45; }
+.detail-row { display: flex; justify-content: flex-start; color: #555; margin-bottom: 4px; }
+.detail-label { color: #888; min-width: 80px; }
+.detail-value { font-weight: 500; color: var(--text); font-variant-numeric: tabular-nums; }
+.browser-meta {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border);
+  font-size: 13px; color: var(--text-secondary);
+}
+.vnc-button {
+  background: var(--primary); color: white; border: none; border-radius: 10px;
+  padding: 9px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: background 0.2s; text-decoration: none;
+  display: inline-block;
+}
+.vnc-button:hover:not(.disabled) { background: var(--primary-hover); }
+.vnc-button.disabled { background: var(--disabled); cursor: not-allowed; pointer-events: none; }
+
+.vnc-wrapper {
+  flex: 1; display: flex; justify-content: center; align-items: center;
+  padding: 40px 20px; overflow: hidden;
+}
+.vnc-window {
+  width: 90%;
+  max-width: 1200px;
+  height: 100%;
+  max-height: 100%;
+  min-width: 300px;
+  min-height: 300px;
+
+  background: var(--surface); backdrop-filter: blur(20px);
+  border-radius: 18px; box-shadow: var(--shadow-large);
+  border: 1px solid var(--border); overflow: hidden;
+  display: flex; flex-direction: column;
+  transition: all var(--transition);
+}
+
+.vnc-window.maximized {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: none;
+  min-width: 0;
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+  margin: 0;
+  z-index: 10000;
+}
+
+.window-header {
+  height: 56px; background: var(--surface-alt); backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--border); display: flex; align-items: center;
+  padding: 0 18px; user-select: none; flex-shrink: 0;
+}
+.window-controls { display: flex; gap: 10px;}
+.control-btn {
+  width: 12px; height: 12px; border-radius: 50%; border: none; cursor: pointer; transition: transform 0.2s;
+}
+.control-btn:hover { transform: scale(1.2); }
+.close-btn { background: #ff5f57; }
+.maximize-btn { background: #28ca42; }
+.window-title { flex: 1; text-align: center; font-size: 15px; font-weight: 600; margin-left: 40px; }
+.fullscreen-btn { background: #28ca42; }
+.fullscreen-active { background: #ffbd2e !important; }
+
+.vnc-container {
+  flex: 1;
+  background: #000;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.vnc-container canvas {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  image-rendering: auto;
+  outline: none;
+  margin: auto;
+}
+
+.vnc-placeholder {
+  position: absolute; inset: 0; display: flex; align-items: center;
+  justify-content: center; color: #555; font-size: 18px; pointer-events: none;
+}
+
+.vnc-status-bar {
+  height: 44px; background: var(--surface-alt); backdrop-filter: blur(20px);
+  border-top: 1px solid var(--border); display: flex; align-items: center;
+  justify-content: space-between; padding: 0 24px; font-size: 13px; color: var(--text-secondary);
+  flex-shrink: 0;
+}
+.status-connected { color: var(--success); font-weight: 600; }
+.status-disconnected { color: #ff5f57; font-weight: 600; }
+
+@media (max-width: 900px) {
+  .vnc-window {
+    width: 92%;
+    min-width: 0;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+}
