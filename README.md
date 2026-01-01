@@ -2,6 +2,8 @@
 
 browser-ui is a small web UI service for browsing active browser sessions and opening a VNC connection. It serves a React/Vite static UI and a minimal JSON API backed by the Browser Service event stream.
 
+https://github.com/user-attachments/assets/208e683a-47f4-43cc-857f-fa1fbe735a46
+
 ## What it does
 - Builds the frontend from `src/` (Vite + React).
 - Serves the UI at `/ui` and redirects `/` to `/ui/`.
