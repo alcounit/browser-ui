@@ -56,7 +56,7 @@ Variable	Description
 - BINARY_NAME	Name of the produced binary (browser-ui).
 - DOCKER_REGISTRY	Docker registry prefix (passed via environment).
 - IMAGE_NAME	Full image name (<registry>/browser-ui).
-- VERSION	Image version/tag (default: :v1.0.1).
+- VERSION	Image version/tag (default: :v0.0.1).
 - PLATFORM	Target platform (default: linux/amd64).
 
 DOCKER_REGISTRY is expected to be provided externally, which allows the same Makefile to be used locally and in CI.
