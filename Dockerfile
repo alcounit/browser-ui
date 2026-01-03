@@ -5,7 +5,7 @@ RUN npm ci --prefix ./src
 COPY src/ ./src/
 RUN npm run build --prefix ./src
 
-FROM golang:1.24.4 AS go-builder
+FROM golang:1.25.0 AS go-builder
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download

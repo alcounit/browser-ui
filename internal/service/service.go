@@ -11,7 +11,7 @@ import (
 
 	logctx "github.com/alcounit/browser-controller/pkg/log"
 	"github.com/alcounit/browser-ui/pkg/types"
-	"github.com/alcounit/seleniferous/pkg/store"
+	"github.com/alcounit/seleniferous/v2/pkg/store"
 	"github.com/gorilla/websocket"
 
 	"github.com/go-chi/chi/v5"

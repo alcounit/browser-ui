@@ -13,8 +13,8 @@ import (
 	"github.com/alcounit/browser-service/pkg/event"
 	"github.com/alcounit/browser-ui/internal/service"
 	"github.com/alcounit/browser-ui/pkg/collector"
-	"github.com/alcounit/seleniferous/pkg/store"
-	"github.com/alcounit/selenosis/pkg/env"
+	"github.com/alcounit/seleniferous/v2/pkg/store"
+	"github.com/alcounit/selenosis/v2/pkg/env"
 	"github.com/rs/zerolog"
 
 	"github.com/go-chi/chi/middleware"

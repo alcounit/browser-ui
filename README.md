@@ -43,46 +43,27 @@ Health:
 - It stores sessions in an in-memory store keyed by `browserId`.
 - The UI reads data from the API and opens VNC via the WebSocket endpoint.
 
-## Build and run (local)
 
-Frontend build:
-```bash
-cd src
-npm ci
-npm run build
-```
+## Build and image workflow
 
-Backend build:
-```bash
-go mod download
-go build -o bin/browser-ui ./cmd/browser-ui
-```
+The project is built and packaged entirely via Docker. Local Go installation is not required for producing the final artifact.
 
-Run:
-```bash
-UI_STATIC_PATH=./src/dist \
-BROWSER_SERVICE_URL=http://localhost:8080 \
-BROWSER_NAMESPACE=default \
-./bin/browser-ui
-```
+## Build variables
 
-## Docker
-The Dockerfile builds the UI and the Go server in separate stages and produces a distroless image.
+The build process is controlled via the following Makefile variables:
 
-```bash
-docker build -t browser-ui:local .
+Variable	Description
+- BINARY_NAME	Name of the produced binary (browser-ui).
+- DOCKER_REGISTRY	Docker registry prefix (passed via environment).
+- IMAGE_NAME	Full image name (<registry>/browser-ui).
+- VERSION	Image version/tag (default: :v1.0.1).
+- PLATFORM	Target platform (default: linux/amd64).
 
-docker run --rm -p 8080:8080 \
-  -e BROWSER_SERVICE_URL=http://browser-service:8080 \
-  -e BROWSER_NAMESPACE=default \
-  browser-ui:local
-```
+DOCKER_REGISTRY is expected to be provided externally, which allows the same Makefile to be used locally and in CI.
 
-## Makefile
-Useful targets:
-- `make docker-build`
-- `make docker-push`
-- `make deploy`
+## Deployment
+
+To be added....
 
 ## Notes
 - The VNC proxy uses WebSocket and expects the sidecar to be available at port `4445` inside the browser pod.
