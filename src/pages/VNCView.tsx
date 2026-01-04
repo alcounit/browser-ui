@@ -20,13 +20,9 @@ export const VNCView: React.FC = () => {
   const [sessionStartTime, setSessionStartTime] = useState<string | null>(initialStart);
   const [uptime, setUptime] = useState("0s");
 
-  //
-  // UPTIME
-  //
   useEffect(() => {
     if (!sessionStartTime) return;
 
-    // обновляет аптайм всегда
     const update = () => setUptime(formatUptime(sessionStartTime));
     update();
 
@@ -81,9 +77,6 @@ export const VNCView: React.FC = () => {
 
     rfbRef.current = rfb;
 
-    //
-    // Resize handler
-    //
     const resizeCanvas = () => {
       if (!rfbRef.current || !containerRef.current) return;
 
@@ -133,9 +126,6 @@ export const VNCView: React.FC = () => {
     } catch { }
   }, [isMaximized]);
 
-  //
-  // Close button
-  //
   const handleClose = () => {
     try {
       rfbRef.current?.disconnect();

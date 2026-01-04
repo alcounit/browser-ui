@@ -22,7 +22,7 @@ export const Dashboard: React.FC = () => {
   const { data: browsers = [], isLoading } = useQuery({
     queryKey: ['browsers'],
     queryFn: fetchBrowsers,
-    refetchInterval: 2000, // Фоновое обновление каждые 2 сек
+    refetchInterval: 2000,
   });
 
   const [now, setNow] = React.useState(Date.now());

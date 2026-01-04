@@ -24,7 +24,6 @@ import (
 )
 
 func init() {
-	// Чтобы Go отдавал JS и CSS с правильными mime-типами
 	mime.AddExtensionType(".js", "application/javascript")
 	mime.AddExtensionType(".mjs", "application/javascript")
 	mime.AddExtensionType(".css", "text/css")
@@ -81,7 +80,6 @@ func main() {
 		log.Fatal().Err(err).Msg("static directory missing")
 	}
 
-	// API
 	router.Route("/api/v1", func(r chi.Router) {
 		r.Route("/browsers", func(r chi.Router) {
 			r.Get("/", svc.ListBrowsers)
@@ -92,7 +90,6 @@ func main() {
 		})
 	})
 
-	// UI: index.html
 	router.Get("/ui", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, filepath.Join(staticPath, "index.html"))
 	})
@@ -100,16 +97,13 @@ func main() {
 		http.ServeFile(w, r, filepath.Join(staticPath, "index.html"))
 	})
 
-	// UI: все остальные статические ресурсы
 	fileServer := http.FileServer(http.Dir(staticPath))
 	router.Handle("/ui/*", http.StripPrefix("/ui/", fileServer))
 
-	// Редирект с корня на UI
 	router.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/ui/", http.StatusFound)
 	})
 
-	// Health check
 	router.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"status":"ok"}`))
 	})
