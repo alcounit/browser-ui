@@ -21,6 +21,7 @@ https://github.com/user-attachments/assets/33abd7d7-e7d3-48f7-9b9f-d6dbe72e4f32
 | `LISTEN_ADDR` | `:8080` | HTTP listen address. |
 | `BROWSER_SERVICE_URL` | `http://browser-service:8080` | Browser Service API base URL. |
 | `BROWSER_NAMESPACE` | `default` | Namespace to watch for `Browser` resources. |
+| `VNC_PASSWORD` | `secret` | VNC password for connection. |
 | `UI_STATIC_PATH` | `/app/static` | Path to built UI assets. |
 
 ## HTTP endpoints

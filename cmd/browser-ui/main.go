@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"mime"
 	"net/http"
 	"os"
@@ -37,6 +38,7 @@ func main() {
 	addr := env.GetEnvOrDefault("LISTEN_ADDR", ":8080")
 	apiURL := env.GetEnvOrDefault("BROWSER_SERVICE_URL", "http://browser-service:8080")
 	namespace := env.GetEnvOrDefault("BROWSER_NAMESPACE", "default")
+	vncPassword := env.GetEnvOrDefault("VNC_PASSWORD", "secret")
 	staticPath := env.GetEnvOrDefault("UI_STATIC_PATH", "/app/static")
 
 	store := store.NewDefaultStore()
@@ -86,6 +88,14 @@ func main() {
 			r.Route("/{browserId}", func(r chi.Router) {
 				r.Get("/", svc.GetBrowser)
 				r.HandleFunc("/vnc", svc.RouteVNC)
+				r.HandleFunc("/vnc/settings", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					if err := json.NewEncoder(w).Encode(map[string]string{"password": vncPassword}); err != nil {
+						log.Error().Err(err).Msg("failed to encode password response")
+						http.Error(w, "failed to encode response", http.StatusInternalServerError)
+						return
+					}
+				})
 			})
 		})
 	})

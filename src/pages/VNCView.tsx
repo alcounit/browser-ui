@@ -62,10 +62,27 @@ export const VNCView: React.FC = () => {
     const url = `${protocol}://${host}/api/v1/browsers/${id}/vnc`;
 
     const rfb: AnyRFB = new (RFB as any)(containerRef.current, url, {
-      credentials: { password: "selenoid" },
       scaleViewport: true,
       resizeSession: false,
     });
+
+    rfb.addEventListener("credentialsrequired", async () => {
+      try {
+        const resp = await fetch(`/api/v1/browsers/${id}/vnc/settings`);
+        if (!resp.ok) throw new Error("failed to get password");
+        const { password } = await resp.json();
+
+        if (typeof rfb.sendCredentials === "function") {
+          rfb.sendCredentials({ password });
+        } else {
+          (rfb as any)._rfb_credentials = { password };
+        }
+      } catch {
+        setStatus("Disconnected");
+        try { rfb.disconnect(); } catch {}
+      }
+    });
+
 
     rfb.viewOnly = false;
     rfb.localCursor = true;
