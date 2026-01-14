@@ -91,6 +91,32 @@ func TestCollectorRunStreamClosed(t *testing.T) {
 	}
 }
 
+func TestCollectorRunEventsError(t *testing.T) {
+	client := &fakeClient{err: errors.New("events error")}
+	col := NewCollector(client, "default", store.NewDefaultStore(), nil)
+
+	err := col.Run(context.Background())
+	if err == nil || err.Error() != "events error" {
+		t.Fatalf("expected events error, got %v", err)
+	}
+}
+
+func TestCollectorRunStreamError(t *testing.T) {
+	stream := &fakeStream{
+		eventsCh: make(chan *event.BrowserEvent, 1),
+		errorsCh: make(chan error, 1),
+	}
+	client := &fakeClient{stream: stream}
+	col := NewCollector(client, "default", store.NewDefaultStore(), nil)
+
+	stream.errorsCh <- errors.New("stream error")
+
+	err := col.Run(context.Background())
+	if err == nil || err.Error() != "stream error" {
+		t.Fatalf("expected stream error, got %v", err)
+	}
+}
+
 func TestCollectorRunDeletesSession(t *testing.T) {
 	stream := &fakeStream{
 		eventsCh: make(chan *event.BrowserEvent, 1),
@@ -102,11 +128,11 @@ func TestCollectorRunDeletesSession(t *testing.T) {
 	col := NewCollector(client, "default", st, nil)
 
 	stream.eventsCh <- newBrowserEvent(event.EventTypeDeleted, "browser-1", "")
-	stream.errorsCh <- errors.New("stop")
+	close(stream.eventsCh)
 
 	err := col.Run(context.Background())
-	if err == nil || err.Error() != "stop" {
-		t.Fatalf("expected stop error, got %v", err)
+	if err == nil || err.Error() != "browser event stream closed unexpectedly" {
+		t.Fatalf("expected stream closed error, got %v", err)
 	}
 	if _, ok := st.Get("browser-1"); ok {
 		t.Fatalf("expected browser-1 to be deleted")
@@ -123,11 +149,11 @@ func TestCollectorRunSkipsEmptyPodIP(t *testing.T) {
 	col := NewCollector(client, "default", st, nil)
 
 	stream.eventsCh <- newBrowserEvent(event.EventTypeAdded, "browser-1", "")
-	stream.errorsCh <- errors.New("stop")
+	close(stream.eventsCh)
 
 	err := col.Run(context.Background())
-	if err == nil || err.Error() != "stop" {
-		t.Fatalf("expected stop error, got %v", err)
+	if err == nil || err.Error() != "browser event stream closed unexpectedly" {
+		t.Fatalf("expected stream closed error, got %v", err)
 	}
 	if st.Len() != 0 {
 		t.Fatalf("expected store to be empty")
@@ -160,11 +186,11 @@ func TestCollectorRunAddsSession(t *testing.T) {
 	col := NewCollector(client, "default", st, nil)
 
 	stream.eventsCh <- newBrowserEvent(event.EventTypeAdded, "browser-1", "127.0.0.1")
-	stream.errorsCh <- errors.New("stop")
+	close(stream.eventsCh)
 
 	err := col.Run(context.Background())
-	if err == nil || err.Error() != "stop" {
-		t.Fatalf("expected stop error, got %v", err)
+	if err == nil || err.Error() != "browser event stream closed unexpectedly" {
+		t.Fatalf("expected stream closed error, got %v", err)
 	}
 
 	val, ok := st.Get("browser-1")
