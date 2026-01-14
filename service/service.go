@@ -11,7 +11,7 @@ import (
 
 	logctx "github.com/alcounit/browser-controller/pkg/log"
 	"github.com/alcounit/browser-ui/pkg/types"
-	"github.com/alcounit/seleniferous/pkg/store"
+	"github.com/alcounit/seleniferous/v2/pkg/store"
 	"github.com/gorilla/websocket"
 
 	"github.com/go-chi/chi/v5"
@@ -19,6 +19,25 @@ import (
 
 type Service struct {
 	store store.Store
+}
+
+type wsConn interface {
+	ReadMessage() (int, []byte, error)
+	WriteMessage(int, []byte) error
+	Close() error
+}
+
+var wsUpgrade = func(rw http.ResponseWriter, req *http.Request) (wsConn, error) {
+	upgrader := websocket.Upgrader{
+		CheckOrigin: func(r *http.Request) bool { return true },
+	}
+	return upgrader.Upgrade(rw, req, nil)
+}
+
+var wsDial = func(target string) (wsConn, error) {
+	dialer := websocket.Dialer{}
+	conn, _, err := dialer.Dial(target, nil)
+	return conn, err
 }
 
 func NewService(store store.Store) *Service {
@@ -74,11 +93,7 @@ func (s *Service) RouteVNC(rw http.ResponseWriter, req *http.Request) {
 	}
 
 	session := val.(*types.Session)
-	upgrader := websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool { return true },
-	}
-
-	client, err := upgrader.Upgrade(rw, req, nil)
+	client, err := wsUpgrade(rw, req)
 	if err != nil {
 		log.Err(err).Str("browserId", browserId).Msg("client ws upgrade failed")
 		return
@@ -91,8 +106,7 @@ func (s *Service) RouteVNC(rw http.ResponseWriter, req *http.Request) {
 		Path:   fmt.Sprintf("/selenosis/v1/vnc/%s", session.SessionId),
 	}
 
-	dialer := websocket.Dialer{}
-	backend, _, err := dialer.Dial(targetURL.String(), nil)
+	backend, err := wsDial(targetURL.String())
 	if err != nil {
 		log.Err(err).Str("browserId", browserId).Str("url", targetURL.String()).Msg("backend ws dial failed")
 		return

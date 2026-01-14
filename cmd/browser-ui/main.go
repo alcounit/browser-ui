@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"mime"
 	"net/http"
 	"os"
@@ -11,10 +12,10 @@ import (
 	"github.com/alcounit/browser-service/pkg/broadcast"
 	"github.com/alcounit/browser-service/pkg/client"
 	"github.com/alcounit/browser-service/pkg/event"
-	"github.com/alcounit/browser-ui/internal/service"
 	"github.com/alcounit/browser-ui/pkg/collector"
-	"github.com/alcounit/seleniferous/pkg/store"
-	"github.com/alcounit/selenosis/pkg/env"
+	"github.com/alcounit/browser-ui/service"
+	"github.com/alcounit/seleniferous/v2/pkg/store"
+	"github.com/alcounit/selenosis/v2/pkg/env"
 	"github.com/rs/zerolog"
 
 	"github.com/go-chi/chi/middleware"
@@ -24,7 +25,6 @@ import (
 )
 
 func init() {
-	// Чтобы Go отдавал JS и CSS с правильными mime-типами
 	mime.AddExtensionType(".js", "application/javascript")
 	mime.AddExtensionType(".mjs", "application/javascript")
 	mime.AddExtensionType(".css", "text/css")
@@ -38,6 +38,7 @@ func main() {
 	addr := env.GetEnvOrDefault("LISTEN_ADDR", ":8080")
 	apiURL := env.GetEnvOrDefault("BROWSER_SERVICE_URL", "http://browser-service:8080")
 	namespace := env.GetEnvOrDefault("BROWSER_NAMESPACE", "default")
+	vncPassword := env.GetEnvOrDefault("VNC_PASSWORD", "secret")
 	staticPath := env.GetEnvOrDefault("UI_STATIC_PATH", "/app/static")
 
 	store := store.NewDefaultStore()
@@ -81,18 +82,24 @@ func main() {
 		log.Fatal().Err(err).Msg("static directory missing")
 	}
 
-	// API
 	router.Route("/api/v1", func(r chi.Router) {
 		r.Route("/browsers", func(r chi.Router) {
 			r.Get("/", svc.ListBrowsers)
 			r.Route("/{browserId}", func(r chi.Router) {
 				r.Get("/", svc.GetBrowser)
 				r.HandleFunc("/vnc", svc.RouteVNC)
+				r.HandleFunc("/vnc/settings", func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					if err := json.NewEncoder(w).Encode(map[string]string{"password": vncPassword}); err != nil {
+						log.Error().Err(err).Msg("failed to encode password response")
+						http.Error(w, "failed to encode response", http.StatusInternalServerError)
+						return
+					}
+				})
 			})
 		})
 	})
 
-	// UI: index.html
 	router.Get("/ui", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, filepath.Join(staticPath, "index.html"))
 	})
@@ -100,16 +107,13 @@ func main() {
 		http.ServeFile(w, r, filepath.Join(staticPath, "index.html"))
 	})
 
-	// UI: все остальные статические ресурсы
 	fileServer := http.FileServer(http.Dir(staticPath))
 	router.Handle("/ui/*", http.StripPrefix("/ui/", fileServer))
 
-	// Редирект с корня на UI
 	router.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/ui/", http.StatusFound)
 	})
 
-	// Health check
 	router.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"status":"ok"}`))
 	})

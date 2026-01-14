@@ -1,11 +1,13 @@
 BINARY_NAME := browser-ui
-DOCKER_REGISTRY ?= 192.168.1.101:30000
-VERSION ?= v1
-IMAGE := $(DOCKER_REGISTRY)/$(BINARY_NAME):$(VERSION)
+REGISTRY ?= localhost:5000
+IMAGE_NAME := $(REGISTRY)/$(BINARY_NAME)
+
+VERSION ?= develop
+EXTRA_TAGS ?=
 PLATFORM ?= linux/amd64
 CONTAINER_TOOL ?= docker
 
-.PHONY: fmt vet tidy docker-build docker-push deploy clean show-vars
+.PHONY: fmt vet tidy test docker-build docker-push deploy clean show-vars
 
 fmt:
 	go fmt ./...
@@ -16,21 +18,33 @@ vet:
 tidy:
 	go mod tidy
 
-docker-build: tidy fmt vet
-	$(CONTAINER_TOOL) build --platform $(PLATFORM) -t $(IMAGE) .
+test:
+	go test -race -count=1 -cover ./...
+
+docker-build: tidy fmt vet test
+	$(CONTAINER_TOOL) buildx build \
+		--platform $(PLATFORM) \
+		-t $(IMAGE_NAME):$(VERSION) \
+		--load \
+		.
 
 docker-push:
-	$(CONTAINER_TOOL) push $(IMAGE)
+	$(CONTAINER_TOOL) buildx build \
+		--platform $(PLATFORM) \
+		-t $(IMAGE_NAME):$(VERSION) \
+		$(EXTRA_TAGS) \
+		--push \
+		.
 
-deploy: docker-build docker-push
+deploy: docker-push
 
 clean:
-	$(CONTAINER_TOOL) rmi $(IMAGE) 2>/dev/null || true
+	$(CONTAINER_TOOL) rmi $(IMAGE_NAME):$(VERSION) 2>/dev/null || true
 
 show-vars:
 	@echo "BINARY_NAME: $(BINARY_NAME)"
-	@echo "DOCKER_REGISTRY: $(DOCKER_REGISTRY)"
+	@echo "REGISTRY: $(REGISTRY)"
+	@echo "IMAGE_NAME: $(IMAGE_NAME)"
 	@echo "VERSION: $(VERSION)"
-	@echo "IMAGE: $(IMAGE)"
 	@echo "PLATFORM: $(PLATFORM)"
 	@echo "CONTAINER_TOOL: $(CONTAINER_TOOL)"

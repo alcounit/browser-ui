@@ -10,8 +10,8 @@ import (
 	"github.com/alcounit/browser-service/pkg/client"
 	"github.com/alcounit/browser-service/pkg/event"
 	"github.com/alcounit/browser-ui/pkg/types"
-	"github.com/alcounit/seleniferous/pkg/store"
-	"github.com/alcounit/selenosis/pkg/ipuuid"
+	"github.com/alcounit/seleniferous/v2/pkg/store"
+	"github.com/alcounit/selenosis/v2/pkg/ipuuid"
 
 	logctx "github.com/alcounit/browser-controller/pkg/log"
 	corev1 "k8s.io/api/core/v1"
