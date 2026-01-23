@@ -24,6 +24,7 @@ test:
 docker-build: tidy fmt vet test
 	$(CONTAINER_TOOL) buildx build \
 		--platform $(PLATFORM) \
+		--build-arg VERSION=$(VERSION) \
 		-t $(IMAGE_NAME):$(VERSION) \
 		--load \
 		.
@@ -31,6 +32,7 @@ docker-build: tidy fmt vet test
 docker-push:
 	$(CONTAINER_TOOL) buildx build \
 		--platform $(PLATFORM) \
+		--build-arg VERSION=$(VERSION) \
 		-t $(IMAGE_NAME):$(VERSION) \
 		$(EXTRA_TAGS) \
 		--push \

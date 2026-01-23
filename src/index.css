@@ -113,6 +113,7 @@ body {
 }
 .browser-name { font-weight: 600; font-size: 16px; }
 .browser-version { color: var(--text-secondary); font-size: 13px; }
+.build-version { color: var(--text-secondary); font-size: 11px; margin-left: 8px; }
 .browser-details { margin-top: 12px; font-size: 14px; line-height: 1.45; }
 .detail-row { display: flex; justify-content: flex-start; color: #555; margin-bottom: 4px; }
 .detail-label { color: #888; min-width: 80px; }
@@ -168,7 +169,7 @@ body {
 .window-header {
   height: 56px; background: var(--surface-alt); backdrop-filter: blur(20px);
   border-bottom: 1px solid var(--border); display: flex; align-items: center;
-  padding: 0 18px; user-select: none; flex-shrink: 0;
+  padding: 0 18px; user-select: none; flex-shrink: 0; position: relative; z-index: 2;
 }
 .window-controls { display: flex; gap: 10px;}
 .control-btn {
@@ -180,6 +181,14 @@ body {
 .window-title { flex: 1; text-align: center; font-size: 15px; font-weight: 600; margin-left: 40px; }
 .fullscreen-btn { background: #28ca42; }
 .fullscreen-active { background: #ffbd2e !important; }
+.window-actions { display: flex; gap: 8px; margin-left: auto; position: relative; }
+.clipboard-btn {
+  padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border);
+  background: transparent; color: var(--text); font-size: 12px; cursor: pointer;
+}
+.clipboard-btn:hover { background: var(--surface); }
+.clipboard-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.clipboard-icon { width: 16px; height: 16px; display: block; }
 
 .vnc-container {
   flex: 1;
@@ -204,6 +213,29 @@ body {
   position: absolute; inset: 0; display: flex; align-items: center;
   justify-content: center; color: #555; font-size: 18px; pointer-events: none;
 }
+.clipboard-hint {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  background: rgba(20, 20, 20, 0.8); color: #f0f0f0; font-size: 12px;
+  padding: 8px 12px; border-radius: 8px; pointer-events: none;
+  text-align: center;
+}
+.clipboard-prompt {
+  position: absolute; top: calc(100% + 8px); right: 0;
+  background: rgba(245, 245, 245, 0.98); color: #222;
+  padding: 12px; border-radius: 10px; width: min(420px, 75vw);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  z-index: 20;
+}
+.clipboard-prompt-title { font-size: 12px; margin-bottom: 6px; }
+.clipboard-prompt-input {
+  width: 100%; resize: none; border-radius: 8px; border: 1px solid #c7c7c7;
+  background: #fff; color: #444; padding: 8px; font-size: 12px;
+}
+.clipboard-prompt-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+.clipboard-prompt-actions .clipboard-btn {
+  background: #e8e8e8; border-color: #c7c7c7; color: #222;
+}
+.clipboard-prompt-actions .clipboard-btn:hover { background: #dcdcdc; }
 
 .vnc-status-bar {
   height: 44px; background: var(--surface-alt); backdrop-filter: blur(20px);

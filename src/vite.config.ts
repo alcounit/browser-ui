@@ -5,6 +5,9 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   base: '/ui/',
+  define: {
+    __BUILD_NUMBER__: JSON.stringify(process.env.VERSION ?? "develop")
+  },
   build: {
   target: 'esnext',
   outDir: '../static',
