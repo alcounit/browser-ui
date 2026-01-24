@@ -1,4 +1,6 @@
 FROM node:22-alpine AS ui-builder
+ARG VERSION=develop
+ENV VERSION=$VERSION
 WORKDIR /src
 COPY src/package*.json ./src/
 RUN npm ci --prefix ./src

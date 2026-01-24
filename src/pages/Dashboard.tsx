@@ -3,6 +3,8 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { formatUptime, getBrowserIcon } from '../utils';
 
+const buildNumber = __BUILD_NUMBER__;
+
 interface Session {
   sessionId: string;
   browserId: string;
@@ -59,7 +61,9 @@ export const Dashboard: React.FC = () => {
   return (
     <>
       <header className="app-header">
-        <div className="header-title">SELENOSIS-UI</div>
+        <div className="header-title">
+          SELENOSIS-UI <span className="build-version">{buildNumber}</span>
+        </div>
         <div className="header-stats">
           <div className="stat-item">BROWSERS TOTAL: <strong>{stats.total}</strong></div>
           <div className="stat-item">
