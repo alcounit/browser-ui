@@ -3,7 +3,19 @@
 Browser UI is a lightweight web application for the **Selenosis** ecosystem.  
 It provides a simple HTTP server that serves a static frontend and exposes a minimal backend API for browsing sessions and connecting to VNC.
 
-Browser UI depends on **browser-service** for browser lifecycle data and event streaming.
+<p align="center">
+  <a href="https://github.com/user-attachments/assets/b5fb55e2-2354-4dbb-8bab-25e7c78bc66c" target="_blank">
+    <img src="https://github.com/user-attachments/assets/b5fb55e2-2354-4dbb-8bab-25e7c78bc66c"
+         width="420"
+         alt="Browser UI dashboard" />
+  </a>
+
+  <a href="https://github.com/user-attachments/assets/95eae48b-d4a6-4638-a0fc-251cdd1d2ff0" target="_blank">
+    <img src="https://github.com/user-attachments/assets/95eae48b-d4a6-4638-a0fc-251cdd1d2ff0"
+         width="420"
+         alt="Browser UI VNC view" />
+  </a>
+</p>
 
 ---
 
