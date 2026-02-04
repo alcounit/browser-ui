@@ -32,7 +32,7 @@ type fakeClient struct {
 	err    error
 }
 
-func (c *fakeClient) Events(ctx context.Context, namespace string) (client.BrowserEventStream, error) {
+func (c *fakeClient) Events(ctx context.Context, namespace string, opts ...client.EventsOption) (client.BrowserEventStream, error) {
 	if c.err != nil {
 		return nil, c.err
 	}
