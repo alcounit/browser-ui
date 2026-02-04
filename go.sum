@@ -2,10 +2,10 @@ github.com/alcounit/browser-controller v0.0.4 h1:bjwoEvYGsQQCl9tcUV9fs+HNHrvpGlW
 github.com/alcounit/browser-controller v0.0.4/go.mod h1:tpj7lwi2UJ49xt/vnEsZKAu5HAvtQJ7xbbcJO3wn+dc=
 github.com/alcounit/browser-service v0.0.4 h1:+1i3vQU0SialjmX/em2pjMB6Q+KgPngvqZacZZJvalY=
 github.com/alcounit/browser-service v0.0.4/go.mod h1:IiPWeaCHpl1uklnPqrzBqNVo8cyDakybEYX0MV7HjiU=
-github.com/alcounit/seleniferous/v2 v2.0.2 h1:7M/S8thRlz/J4aD5Sm873vJQ+CEMU8293wbsyTyHlbI=
-github.com/alcounit/seleniferous/v2 v2.0.2/go.mod h1:9CcZeKAnnU/9ekUHoCtGMv0/7nRRwH9o1BOyO1yljFo=
-github.com/alcounit/selenosis/v2 v2.0.3 h1:ewpHzsXUSmWKNlFxt58FyBSWa009jD+0gGyrTodGv1Y=
-github.com/alcounit/selenosis/v2 v2.0.3/go.mod h1:yDvsYZJ+cgsJIcFoOIF5djRyX3TIWG8qZsJL9SNddIk=
+github.com/alcounit/seleniferous/v2 v2.0.3 h1:F1MdjycTyQbM6DeRPkgT4CQ8l88RsQ62tOcKMK5z6Gc=
+github.com/alcounit/seleniferous/v2 v2.0.3/go.mod h1:gJCSkJPLCGPHWRvL/yQn67+/sqpAgw4Z23pizhHArMI=
+github.com/alcounit/selenosis/v2 v2.0.4 h1:Lib2N3WVO9pjfV1YfxUcuFx6g3Y5shDIGMoSj+gfBUk=
+github.com/alcounit/selenosis/v2 v2.0.4/go.mod h1:36qVRQH05hYL5e90Sll6nfSDWwtMU7wCpn7K87BTqrQ=
 github.com/coreos/go-systemd/v22 v22.5.0/go.mod h1:Y58oyj3AT4RCenI/lSvhwexgC+NSVTIJ3seZv2GcEnc=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
