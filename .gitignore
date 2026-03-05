@@ -1,1 +1,6 @@
 .DS_Store
+Dockerfile.local
+Makefile.local
+out/
+static/
+src/node_modules/
