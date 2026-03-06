@@ -4,11 +4,11 @@ on:
   pull_request:
   push:
     branches: ["main"]
-  release:
-    types: [published]
+    tags:
+      - 'v*'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   test:
@@ -34,19 +34,19 @@ jobs:
   docker:
     name: Build & Push Docker image (release only)
     runs-on: ubuntu-latest
-    if: github.event_name == 'release' && github.event.action == 'published'
+    if: startsWith(github.ref, 'refs/tags/')
     steps:
       - name: Checkout (release tag)
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ github.ref_name }}
 
       - name: Set image tag (VERSION) from release tag
         id: meta
         shell: bash
         run: |
           set -euo pipefail
-          echo "version=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+          echo "version=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -72,3 +72,11 @@ jobs:
           VERSION: ${{ steps.meta.outputs.version }}
         run: |
           echo "Pushed image: ${REGISTRY}/browser-ui:${VERSION}"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "${{ github.ref_name }}" \
+            --generate-notes          

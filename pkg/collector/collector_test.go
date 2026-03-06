@@ -28,8 +28,10 @@ func (s *fakeStream) Errors() <-chan error               { return s.errorsCh }
 func (s *fakeStream) Close()                             { s.closed = true }
 
 type fakeClient struct {
-	stream *fakeStream
-	err    error
+	stream   *fakeStream
+	err      error
+	browsers []*browserv1.Browser
+	listErr  error
 }
 
 func (c *fakeClient) Events(ctx context.Context, namespace string, opts ...client.EventsOption) (client.BrowserEventStream, error) {
@@ -39,6 +41,10 @@ func (c *fakeClient) Events(ctx context.Context, namespace string, opts ...clien
 	return c.stream, nil
 }
 
+func (c *fakeClient) ListBrowsers(context.Context, string) ([]*browserv1.Browser, error) {
+	return c.browsers, c.listErr
+}
+
 func (c *fakeClient) CreateBrowser(context.Context, string, *browserv1.Browser) (*browserv1.Browser, error) {
 	panic("not used")
 }
@@ -46,9 +52,6 @@ func (c *fakeClient) GetBrowser(context.Context, string, string) (*browserv1.Bro
 	panic("not used")
 }
 func (c *fakeClient) DeleteBrowser(context.Context, string, string) error {
-	panic("not used")
-}
-func (c *fakeClient) ListBrowsers(context.Context, string) ([]*browserv1.Browser, error) {
 	panic("not used")
 }
 
@@ -173,6 +176,59 @@ func TestCollectorRunInvalidIP(t *testing.T) {
 	err := col.Run(context.Background())
 	if err == nil || err.Error() != "failed to convert IP to UUID" {
 		t.Fatalf("expected convert error, got %v", err)
+	}
+}
+
+func TestCollectorRunListBrowsersError(t *testing.T) {
+	cl := &fakeClient{listErr: errors.New("list error")}
+	col := NewCollector(cl, "default", store.NewDefaultStore(), nil)
+
+	err := col.Run(context.Background())
+	if err == nil || err.Error() != "list error" {
+		t.Fatalf("expected list error, got %v", err)
+	}
+}
+
+func TestCollectorRunListBrowsersPopulatesStore(t *testing.T) {
+	stream := &fakeStream{
+		eventsCh: make(chan *event.BrowserEvent),
+		errorsCh: make(chan error),
+	}
+	close(stream.eventsCh)
+
+	now := metav1.NewTime(time.Unix(0, 0).UTC())
+	existing := &browserv1.Browser{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "browser-existing",
+			CreationTimestamp: now,
+		},
+		Spec: browserv1.BrowserSpec{
+			BrowserName:    "chrome",
+			BrowserVersion: "123",
+		},
+		Status: browserv1.BrowserStatus{
+			PodIP: "127.0.0.1",
+			Phase: corev1.PodRunning,
+		},
+	}
+
+	st := store.NewDefaultStore()
+	cl := &fakeClient{stream: stream, browsers: []*browserv1.Browser{existing}}
+	col := NewCollector(cl, "default", st, nil)
+
+	col.Run(context.Background()) //nolint:errcheck
+
+	val, ok := st.Get("browser-existing")
+	if !ok {
+		t.Fatalf("expected browser-existing to be in store after ListBrowsers")
+	}
+	sess, ok := val.(*types.Session)
+	if !ok {
+		t.Fatalf("expected stored value to be *types.Session")
+	}
+	expectedID, _ := ipuuid.IPToUUID(net.ParseIP("127.0.0.1"))
+	if sess.SessionId != expectedID.String() {
+		t.Fatalf("expected sessionId %s, got %s", expectedID.String(), sess.SessionId)
 	}
 }
 
