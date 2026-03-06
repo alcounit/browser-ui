@@ -1,4 +1,4 @@
-[![GitHub release](https://img.shields.io/github/v/release/alcounit/browser-ui)](https://github.com/alcounit/browser-ui/releases) [![Docker Pulls](https://img.shields.io/docker/pulls/alcounit/browser-ui.svg)](https://hub.docker.com/r/alcounit/browser-ui)
+[![GitHub release](https://img.shields.io/github/v/release/alcounit/browser-ui)](https://github.com/alcounit/browser-ui/releases) [![Go Reference](https://pkg.go.dev/badge/github.com/alcounit/browser-ui.svg)](https://pkg.go.dev/github.com/alcounit/browser-ui) [![Docker Pulls](https://img.shields.io/docker/pulls/alcounit/browser-ui.svg)](https://hub.docker.com/r/alcounit/browser-ui)
 
 # Browser UI
 
