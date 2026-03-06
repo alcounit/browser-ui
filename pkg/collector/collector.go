@@ -13,6 +13,7 @@ import (
 	"github.com/alcounit/seleniferous/v2/pkg/store"
 	"github.com/alcounit/selenosis/v2/pkg/ipuuid"
 
+	browserv1 "github.com/alcounit/browser-controller/apis/browser/v1"
 	logctx "github.com/alcounit/browser-controller/pkg/log"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -33,6 +34,24 @@ func (c *Collector) Run(ctx context.Context) error {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	browsers, err := c.client.ListBrowsers(ctx, c.namespace)
+	if err != nil {
+		return err
+
+	}
+
+	for _, browser := range browsers {
+		sessionId, err := parseIp(browser.Status.PodIP)
+		if err != nil {
+			log.Error().Err(err).Str("sessionId", sessionId).Msgf("sessionId not found")
+			return errors.New("failed to convert IP to UUID")
+		}
+
+		storeSession(sessionId, browser, c)
+		log.Info().Str("sessionId", sessionId).Msg("add session to store")
+
+	}
 
 	stream, err := c.client.Events(ctx, c.namespace)
 	if err != nil {
@@ -65,19 +84,10 @@ func (c *Collector) Run(ctx context.Context) error {
 					return errors.New("failed to convert IP to UUID")
 				}
 
-				sess := &types.Session{
-					SessionId:      sessionId,
-					BrowserId:      browserEvent.Browser.Name,
-					BrowserIP:      browserEvent.Browser.Status.PodIP,
-					BrowserName:    browserEvent.Browser.Spec.BrowserName,
-					BrowserVersion: browserEvent.Browser.Spec.BrowserVersion,
-					StartTime:      browserEvent.Browser.CreationTimestamp.DeepCopy(),
-					Phase:          corev1.PodPhase(browserEvent.Browser.Status.Phase),
-				}
-				eventType := strings.ToLower(string(browserEvent.EventType))
+				storeSession(sessionId, browserEvent.Browser, c)
 
-				c.store.Set(browserEvent.Browser.Name, sess)
-				log.Info().Str("eventType", eventType).Str("sessionId", sess.SessionId).Msg("add/update session in store")
+				eventType := strings.ToLower(string(browserEvent.EventType))
+				log.Info().Str("eventType", eventType).Str("sessionId", sessionId).Msg("add/update session in store")
 				continue
 			}
 
@@ -97,4 +107,17 @@ func parseIp(ip string) (string, error) {
 	rawId, err := ipuuid.IPToUUID(netIp)
 	return rawId.String(), err
 
+}
+
+func storeSession(sessionId string, browser *browserv1.Browser, c *Collector) {
+	sess := &types.Session{
+		SessionId:      sessionId,
+		BrowserId:      browser.Name,
+		BrowserIP:      browser.Status.PodIP,
+		BrowserName:    browser.Spec.BrowserName,
+		BrowserVersion: browser.Spec.BrowserVersion,
+		StartTime:      browser.CreationTimestamp.DeepCopy(),
+		Phase:          corev1.PodPhase(browser.Status.Phase),
+	}
+	c.store.Set(browser.Name, sess)
 }
