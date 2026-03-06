@@ -1,3 +1,5 @@
+[![Docker Pulls](https://img.shields.io/docker/pulls/alcounit/browser-ui.svg)](https://hub.docker.com/r/alcounit/browser-ui)
+
 # Browser UI
 
 Browser UI is a lightweight web application for the **Selenosis** ecosystem.  
