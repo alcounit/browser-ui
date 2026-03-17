@@ -71,16 +71,22 @@ Base path:
 
 Endpoints:
 
-- `GET /api/v1/browsers/`  
-  List sessions known to the UI (in-memory view)
+- `GET /api/v1/status/`
+  Returns active sessions and supported browsers from the in-memory store
 
-- `GET /api/v1/browsers/{browserId}/`  
+- `POST /api/v1/browsers/`
+  Create and start a browser session. Body: `{"browserName":"chrome","browserVersion":"146.0","selenosisOptions":{}}`
+
+- `GET /api/v1/browsers/{browserId}/`
   Get a single session by Browser ID
 
-- `GET /api/v1/browsers/{browserId}/vnc`  
-  WebSocket proxy to the browser VNC endpoint
+- `DELETE /api/v1/browsers/{browserId}/`
+  Delete a manually-started session (only sessions created via `POST /browsers/`)
 
-- `GET /api/v1/browsers/{browserId}/vnc/settings`  
+- `GET /api/v1/browsers/{browserId}/vnc`
+  WebSocket proxy to the browser pod VNC endpoint
+
+- `GET /api/v1/browsers/{browserId}/vnc/settings`
   Returns VNC settings (currently returns the password)
 
 ### Health

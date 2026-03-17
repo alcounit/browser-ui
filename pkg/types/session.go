@@ -6,11 +6,12 @@ import (
 )
 
 type Session struct {
-	SessionId      string          `json:"sessionId"`
-	BrowserId      string          `json:"browserId"`
-	BrowserIP      string          `json:"-"`
-	BrowserName    string          `json:"browserName"`
-	BrowserVersion string          `json:"browserVersion"`
-	StartTime      *metav1.Time    `json:"startTime"`
-	Phase          corev1.PodPhase `json:"phase"`
+	SessionId       string          `json:"sessionId"`
+	BrowserId       string          `json:"browserId"`
+	BrowserIP       string          `json:"-"`
+	BrowserName     string          `json:"browserName"`
+	BrowserVersion  string          `json:"browserVersion"`
+	StartedManually bool            `json:"startedManually"`
+	StartTime       *metav1.Time    `json:"startTime"`
+	Phase           corev1.PodPhase `json:"phase"`
 }
