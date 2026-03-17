@@ -7,38 +7,42 @@ import (
 	"strings"
 
 	"github.com/alcounit/browser-service/pkg/broadcast"
-	"github.com/alcounit/browser-service/pkg/client"
+	browserclient "github.com/alcounit/browser-service/pkg/client/browser"
+	browserconfigclient "github.com/alcounit/browser-service/pkg/client/browserconfig"
 	"github.com/alcounit/browser-service/pkg/event"
 	"github.com/alcounit/browser-ui/pkg/types"
 	"github.com/alcounit/seleniferous/v2/pkg/store"
 	"github.com/alcounit/selenosis/v2/pkg/ipuuid"
 
 	browserv1 "github.com/alcounit/browser-controller/apis/browser/v1"
+	browserconfigv1 "github.com/alcounit/browser-controller/apis/browserconfig/v1"
 	logctx "github.com/alcounit/browser-controller/pkg/log"
 	corev1 "k8s.io/api/core/v1"
 )
 
 type Collector struct {
-	client      client.Client
-	namespace   string
-	store       store.Store
-	broadcaster broadcast.Broadcaster[event.BrowserEvent]
+	browserClient browserclient.Client
+	configClient  browserconfigclient.Client
+	namespace     string
+	sessionStore  store.Store[*types.Session]
+	configStore   store.Store[types.BrowserVersions]
+	broadcaster   broadcast.Broadcaster[event.BrowserEvent]
 }
 
-func NewCollector(client client.Client, namespace string, store store.Store, broadcaster broadcast.Broadcaster[event.BrowserEvent]) *Collector {
-	return &Collector{client, namespace, store, broadcaster}
+func NewCollector(browserClient browserclient.Client, configClient browserconfigclient.Client, namespace string, sessionStore store.Store[*types.Session], configStore store.Store[types.BrowserVersions], broadcaster broadcast.Broadcaster[event.BrowserEvent]) *Collector {
+	return &Collector{browserClient, configClient, namespace, sessionStore, configStore, broadcaster}
 }
 
 func (c *Collector) Run(ctx context.Context) error {
 	log := logctx.FromContext(ctx)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	browsers, err := c.client.ListBrowsers(ctx, c.namespace)
+	browsers, err := c.browserClient.List(ctx, c.namespace)
 	if err != nil {
+		log.Error().Err(err).Msg("failed to list browsers")
 		return err
-
 	}
 
 	for _, browser := range browsers {
@@ -53,17 +57,34 @@ func (c *Collector) Run(ctx context.Context) error {
 
 	}
 
-	stream, err := c.client.Events(ctx, c.namespace)
+	configs, err := c.configClient.List(ctx, c.namespace)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to list browser configs")
+		return err
+	}
+
+	for _, cfg := range configs {
+		storeBrowserConfig(cfg.Name, cfg, c)
+		log.Info().Str("configName", cfg.Name).Msg("add browser config to store")
+	}
+
+	browserStream, err := c.browserClient.Events(ctx, c.namespace)
 	if err != nil {
 		return err
 	}
-	defer stream.Close()
+	defer browserStream.Close()
+
+	configStream, err := c.configClient.Events(ctx, c.namespace)
+	if err != nil {
+		return err
+	}
+	defer configStream.Close()
 
 	log.Info().Msg("starting collector")
 
 	for {
 		select {
-		case browserEvent, ok := <-stream.Events():
+		case browserEvent, ok := <-browserStream.Events():
 			if !ok {
 				log.Error().Msg("browser event stream closed unexpectedly")
 				return errors.New("browser event stream closed unexpectedly")
@@ -71,7 +92,7 @@ func (c *Collector) Run(ctx context.Context) error {
 
 			switch browserEvent.EventType {
 			case event.EventTypeDeleted:
-				c.store.Delete(browserEvent.Browser.Name)
+				c.sessionStore.Delete(browserEvent.Browser.Name)
 				log.Info().Str("eventType", "deleted").Str("sessionId", browserEvent.Browser.Name).Msg("delete session from store")
 				continue
 			case event.EventTypeAdded, event.EventTypeModified:
@@ -91,7 +112,30 @@ func (c *Collector) Run(ctx context.Context) error {
 				continue
 			}
 
-		case err, ok := <-stream.Errors():
+		case configEvent, ok := <-configStream.Events():
+			if !ok {
+				log.Error().Msg("browser config event stream closed unexpectedly")
+				return errors.New("browser config event stream closed unexpectedly")
+			}
+
+			cfg := configEvent.BrowserConfig
+			switch configEvent.EventType {
+			case event.EventTypeDeleted:
+				c.configStore.Delete(cfg.Name)
+				log.Info().Str("eventType", "deleted").Str("configName", cfg.Name).Msg("delete browser config from store")
+			case event.EventTypeAdded, event.EventTypeModified:
+
+				storeBrowserConfig(cfg.Name, cfg, c)
+				eventType := strings.ToLower(string(configEvent.EventType))
+				log.Info().Str("eventType", eventType).Str("configName", cfg.Name).Msg("add/update browser config in store")
+			}
+
+		case err, ok := <-browserStream.Errors():
+			if ok && err != nil {
+				return err
+			}
+
+		case err, ok := <-configStream.Errors():
 			if ok && err != nil {
 				return err
 			}
@@ -109,6 +153,19 @@ func parseIp(ip string) (string, error) {
 
 }
 
+func storeBrowserConfig(configName string, cfg *browserconfigv1.BrowserConfig, c *Collector) {
+	result := make(types.BrowserVersions, len(cfg.Spec.Browsers))
+	for browserName, versions := range cfg.Spec.Browsers {
+		vs := make([]string, 0, len(versions))
+		for v := range versions {
+			vs = append(vs, v)
+		}
+		result[browserName] = vs
+	}
+
+	c.configStore.Set(configName, result)
+}
+
 func storeSession(sessionId string, browser *browserv1.Browser, c *Collector) {
 	sess := &types.Session{
 		SessionId:      sessionId,
@@ -119,5 +176,10 @@ func storeSession(sessionId string, browser *browserv1.Browser, c *Collector) {
 		StartTime:      browser.CreationTimestamp.DeepCopy(),
 		Phase:          corev1.PodPhase(browser.Status.Phase),
 	}
-	c.store.Set(browser.Name, sess)
+
+	if _, exist := browser.Annotations["startedManually"]; exist {
+		sess.StartedManually = true
+	}
+
+	c.sessionStore.Set(browser.Name, sess)
 }

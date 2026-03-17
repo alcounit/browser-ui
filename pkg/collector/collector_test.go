@@ -8,7 +8,9 @@ import (
 	"time"
 
 	browserv1 "github.com/alcounit/browser-controller/apis/browser/v1"
-	"github.com/alcounit/browser-service/pkg/client"
+	browserconfigv1 "github.com/alcounit/browser-controller/apis/browserconfig/v1"
+	browserclient "github.com/alcounit/browser-service/pkg/client/browser"
+	browserconfigclient "github.com/alcounit/browser-service/pkg/client/browserconfig"
 	"github.com/alcounit/browser-service/pkg/event"
 	"github.com/alcounit/browser-ui/pkg/types"
 	"github.com/alcounit/seleniferous/v2/pkg/store"
@@ -34,25 +36,80 @@ type fakeClient struct {
 	listErr  error
 }
 
-func (c *fakeClient) Events(ctx context.Context, namespace string, opts ...client.EventsOption) (client.BrowserEventStream, error) {
+func (c *fakeClient) Events(ctx context.Context, namespace string, opts ...event.EventsOption) (browserclient.EventStream, error) {
 	if c.err != nil {
 		return nil, c.err
 	}
 	return c.stream, nil
 }
 
-func (c *fakeClient) ListBrowsers(context.Context, string) ([]*browserv1.Browser, error) {
+func (c *fakeClient) List(context.Context, string) ([]*browserv1.Browser, error) {
 	return c.browsers, c.listErr
 }
 
-func (c *fakeClient) CreateBrowser(context.Context, string, *browserv1.Browser) (*browserv1.Browser, error) {
+func (c *fakeClient) Create(context.Context, string, *browserv1.Browser) (*browserv1.Browser, error) {
 	panic("not used")
 }
-func (c *fakeClient) GetBrowser(context.Context, string, string) (*browserv1.Browser, error) {
+func (c *fakeClient) Get(context.Context, string, string) (*browserv1.Browser, error) {
 	panic("not used")
 }
-func (c *fakeClient) DeleteBrowser(context.Context, string, string) error {
+func (c *fakeClient) Delete(context.Context, string, string) error {
 	panic("not used")
+}
+
+type fakeConfigStream struct {
+	eventsCh chan *event.BrowserConfigEvent
+	errorsCh chan error
+}
+
+func (s *fakeConfigStream) Events() <-chan *event.BrowserConfigEvent { return s.eventsCh }
+func (s *fakeConfigStream) Errors() <-chan error                     { return s.errorsCh }
+func (s *fakeConfigStream) Close() {
+	// Close channels safely.
+	select {
+	case <-s.eventsCh:
+	default:
+	}
+}
+
+// fakeConfigClient implements browserconfigclient.Client with configurable behavior.
+type fakeConfigClient struct {
+	listErr   error
+	listData  []*browserconfigv1.BrowserConfig
+	stream    *fakeConfigStream
+	eventsErr error
+}
+
+func (c *fakeConfigClient) Create(context.Context, string, *browserconfigv1.BrowserConfig) (*browserconfigv1.BrowserConfig, error) {
+	panic("not used")
+}
+func (c *fakeConfigClient) Get(context.Context, string, string) (*browserconfigv1.BrowserConfig, error) {
+	panic("not used")
+}
+func (c *fakeConfigClient) Delete(context.Context, string, string) error {
+	panic("not used")
+}
+func (c *fakeConfigClient) List(context.Context, string) ([]*browserconfigv1.BrowserConfig, error) {
+	return c.listData, c.listErr
+}
+func (c *fakeConfigClient) Events(ctx context.Context, namespace string, opts ...event.EventsOption) (browserconfigclient.EventStream, error) {
+	if c.eventsErr != nil {
+		return nil, c.eventsErr
+	}
+	if c.stream != nil {
+		return c.stream, nil
+	}
+	// Default: create a stream that closes when ctx is done.
+	s := &fakeConfigStream{
+		eventsCh: make(chan *event.BrowserConfigEvent),
+		errorsCh: make(chan error),
+	}
+	go func() {
+		<-ctx.Done()
+		close(s.eventsCh)
+		close(s.errorsCh)
+	}()
+	return s, nil
 }
 
 func newBrowserEvent(eventType event.EventType, name, podIP string) *event.BrowserEvent {
@@ -76,6 +133,18 @@ func newBrowserEvent(eventType event.EventType, name, podIP string) *event.Brows
 	}
 }
 
+func newConfigEvent(eventType event.EventType, name string, browsers map[string]map[string]*browserconfigv1.BrowserVersionConfigSpec) *event.BrowserConfigEvent {
+	return &event.BrowserConfigEvent{
+		EventType: eventType,
+		BrowserConfig: &browserconfigv1.BrowserConfig{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec: browserconfigv1.BrowserConfigSpec{
+				Browsers: browsers,
+			},
+		},
+	}
+}
+
 func TestCollectorRunStreamClosed(t *testing.T) {
 	stream := &fakeStream{
 		eventsCh: make(chan *event.BrowserEvent),
@@ -84,7 +153,7 @@ func TestCollectorRunStreamClosed(t *testing.T) {
 	close(stream.eventsCh)
 	client := &fakeClient{stream: stream}
 
-	col := NewCollector(client, "default", store.NewDefaultStore(), nil)
+	col := NewCollector(client, &fakeConfigClient{}, "default", store.NewDefaultStore[*types.Session](), store.NewDefaultStore[types.BrowserVersions](), nil)
 	err := col.Run(context.Background())
 	if err == nil || err.Error() != "browser event stream closed unexpectedly" {
 		t.Fatalf("expected stream closed error, got %v", err)
@@ -96,7 +165,7 @@ func TestCollectorRunStreamClosed(t *testing.T) {
 
 func TestCollectorRunEventsError(t *testing.T) {
 	client := &fakeClient{err: errors.New("events error")}
-	col := NewCollector(client, "default", store.NewDefaultStore(), nil)
+	col := NewCollector(client, &fakeConfigClient{}, "default", store.NewDefaultStore[*types.Session](), store.NewDefaultStore[types.BrowserVersions](), nil)
 
 	err := col.Run(context.Background())
 	if err == nil || err.Error() != "events error" {
@@ -110,7 +179,7 @@ func TestCollectorRunStreamError(t *testing.T) {
 		errorsCh: make(chan error, 1),
 	}
 	client := &fakeClient{stream: stream}
-	col := NewCollector(client, "default", store.NewDefaultStore(), nil)
+	col := NewCollector(client, &fakeConfigClient{}, "default", store.NewDefaultStore[*types.Session](), store.NewDefaultStore[types.BrowserVersions](), nil)
 
 	stream.errorsCh <- errors.New("stream error")
 
@@ -126,9 +195,9 @@ func TestCollectorRunDeletesSession(t *testing.T) {
 		errorsCh: make(chan error, 1),
 	}
 	client := &fakeClient{stream: stream}
-	st := store.NewDefaultStore()
-	st.Set("browser-1", "value")
-	col := NewCollector(client, "default", st, nil)
+	st := store.NewDefaultStore[*types.Session]()
+	st.Set("browser-1", &types.Session{BrowserId: "browser-1"})
+	col := NewCollector(client, &fakeConfigClient{}, "default", st, store.NewDefaultStore[types.BrowserVersions](), nil)
 
 	stream.eventsCh <- newBrowserEvent(event.EventTypeDeleted, "browser-1", "")
 	close(stream.eventsCh)
@@ -148,8 +217,8 @@ func TestCollectorRunSkipsEmptyPodIP(t *testing.T) {
 		errorsCh: make(chan error, 1),
 	}
 	client := &fakeClient{stream: stream}
-	st := store.NewDefaultStore()
-	col := NewCollector(client, "default", st, nil)
+	st := store.NewDefaultStore[*types.Session]()
+	col := NewCollector(client, &fakeConfigClient{}, "default", st, store.NewDefaultStore[types.BrowserVersions](), nil)
 
 	stream.eventsCh <- newBrowserEvent(event.EventTypeAdded, "browser-1", "")
 	close(stream.eventsCh)
@@ -169,7 +238,7 @@ func TestCollectorRunInvalidIP(t *testing.T) {
 		errorsCh: make(chan error, 1),
 	}
 	client := &fakeClient{stream: stream}
-	col := NewCollector(client, "default", store.NewDefaultStore(), nil)
+	col := NewCollector(client, &fakeConfigClient{}, "default", store.NewDefaultStore[*types.Session](), store.NewDefaultStore[types.BrowserVersions](), nil)
 
 	stream.eventsCh <- newBrowserEvent(event.EventTypeAdded, "browser-1", "not-an-ip")
 
@@ -181,7 +250,7 @@ func TestCollectorRunInvalidIP(t *testing.T) {
 
 func TestCollectorRunListBrowsersError(t *testing.T) {
 	cl := &fakeClient{listErr: errors.New("list error")}
-	col := NewCollector(cl, "default", store.NewDefaultStore(), nil)
+	col := NewCollector(cl, &fakeConfigClient{}, "default", store.NewDefaultStore[*types.Session](), store.NewDefaultStore[types.BrowserVersions](), nil)
 
 	err := col.Run(context.Background())
 	if err == nil || err.Error() != "list error" {
@@ -212,19 +281,15 @@ func TestCollectorRunListBrowsersPopulatesStore(t *testing.T) {
 		},
 	}
 
-	st := store.NewDefaultStore()
+	st := store.NewDefaultStore[*types.Session]()
 	cl := &fakeClient{stream: stream, browsers: []*browserv1.Browser{existing}}
-	col := NewCollector(cl, "default", st, nil)
+	col := NewCollector(cl, &fakeConfigClient{}, "default", st, store.NewDefaultStore[types.BrowserVersions](), nil)
 
 	col.Run(context.Background()) //nolint:errcheck
 
-	val, ok := st.Get("browser-existing")
+	sess, ok := st.Get("browser-existing")
 	if !ok {
 		t.Fatalf("expected browser-existing to be in store after ListBrowsers")
-	}
-	sess, ok := val.(*types.Session)
-	if !ok {
-		t.Fatalf("expected stored value to be *types.Session")
 	}
 	expectedID, _ := ipuuid.IPToUUID(net.ParseIP("127.0.0.1"))
 	if sess.SessionId != expectedID.String() {
@@ -238,8 +303,8 @@ func TestCollectorRunAddsSession(t *testing.T) {
 		errorsCh: make(chan error, 1),
 	}
 	client := &fakeClient{stream: stream}
-	st := store.NewDefaultStore()
-	col := NewCollector(client, "default", st, nil)
+	st := store.NewDefaultStore[*types.Session]()
+	col := NewCollector(client, &fakeConfigClient{}, "default", st, store.NewDefaultStore[types.BrowserVersions](), nil)
 
 	stream.eventsCh <- newBrowserEvent(event.EventTypeAdded, "browser-1", "127.0.0.1")
 	close(stream.eventsCh)
@@ -249,14 +314,9 @@ func TestCollectorRunAddsSession(t *testing.T) {
 		t.Fatalf("expected stream closed error, got %v", err)
 	}
 
-	val, ok := st.Get("browser-1")
+	sess, ok := st.Get("browser-1")
 	if !ok {
 		t.Fatalf("expected browser-1 to be stored")
-	}
-
-	sess, ok := val.(*types.Session)
-	if !ok {
-		t.Fatalf("expected stored value to be *types.Session")
 	}
 
 	expectedID, _ := ipuuid.IPToUUID(net.ParseIP("127.0.0.1"))
@@ -265,5 +325,269 @@ func TestCollectorRunAddsSession(t *testing.T) {
 	}
 	if sess.BrowserIP != "127.0.0.1" {
 		t.Fatalf("expected browserIP 127.0.0.1, got %s", sess.BrowserIP)
+	}
+}
+
+// --- New tests for collector ---
+
+func TestCollectorRunListConfigsError(t *testing.T) {
+	// browser stream that is ready
+	stream := &fakeStream{
+		eventsCh: make(chan *event.BrowserEvent),
+		errorsCh: make(chan error),
+	}
+	cl := &fakeClient{stream: stream}
+	cfgClient := &fakeConfigClient{listErr: errors.New("config list error")}
+
+	col := NewCollector(cl, cfgClient, "default", store.NewDefaultStore[*types.Session](), store.NewDefaultStore[types.BrowserVersions](), nil)
+	err := col.Run(context.Background())
+	if err == nil || err.Error() != "config list error" {
+		t.Fatalf("expected config list error, got %v", err)
+	}
+}
+
+func TestCollectorRunListConfigsPopulatesStore(t *testing.T) {
+	// browser stream immediately closed so we get an error
+	stream := &fakeStream{
+		eventsCh: make(chan *event.BrowserEvent),
+		errorsCh: make(chan error),
+	}
+	close(stream.eventsCh)
+
+	cfg := &browserconfigv1.BrowserConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: "cfg-1"},
+		Spec: browserconfigv1.BrowserConfigSpec{
+			Browsers: map[string]map[string]*browserconfigv1.BrowserVersionConfigSpec{
+				"chrome": {
+					"123": {Image: "chrome:123"},
+				},
+			},
+		},
+	}
+
+	cl := &fakeClient{stream: stream}
+	cfgClient := &fakeConfigClient{listData: []*browserconfigv1.BrowserConfig{cfg}}
+	cfgStore := store.NewDefaultStore[types.BrowserVersions]()
+
+	col := NewCollector(cl, cfgClient, "default", store.NewDefaultStore[*types.Session](), cfgStore, nil)
+	col.Run(context.Background()) //nolint:errcheck
+
+	bv, ok := cfgStore.Get("cfg-1")
+	if !ok {
+		t.Fatalf("expected cfg-1 to be in config store")
+	}
+	versions, ok := bv["chrome"]
+	if !ok {
+		t.Fatalf("expected chrome in browser versions")
+	}
+	if len(versions) != 1 || versions[0] != "123" {
+		t.Fatalf("expected version 123, got %v", versions)
+	}
+}
+
+func TestCollectorRunConfigEventsError(t *testing.T) {
+	browserStream := &fakeStream{
+		eventsCh: make(chan *event.BrowserEvent, 1),
+		errorsCh: make(chan error, 1),
+	}
+	configStream := &fakeConfigStream{
+		eventsCh: make(chan *event.BrowserConfigEvent, 1),
+		errorsCh: make(chan error, 1),
+	}
+
+	cl := &fakeClient{stream: browserStream}
+	cfgClient := &fakeConfigClient{stream: configStream}
+
+	col := NewCollector(cl, cfgClient, "default", store.NewDefaultStore[*types.Session](), store.NewDefaultStore[types.BrowserVersions](), nil)
+
+	configStream.errorsCh <- errors.New("config stream error")
+
+	err := col.Run(context.Background())
+	if err == nil || err.Error() != "config stream error" {
+		t.Fatalf("expected config stream error, got %v", err)
+	}
+}
+
+func TestCollectorRunConfigStreamClosed(t *testing.T) {
+	browserStream := &fakeStream{
+		eventsCh: make(chan *event.BrowserEvent, 1),
+		errorsCh: make(chan error, 1),
+	}
+	configStream := &fakeConfigStream{
+		eventsCh: make(chan *event.BrowserConfigEvent),
+		errorsCh: make(chan error),
+	}
+	close(configStream.eventsCh)
+
+	cl := &fakeClient{stream: browserStream}
+	cfgClient := &fakeConfigClient{stream: configStream}
+
+	col := NewCollector(cl, cfgClient, "default", store.NewDefaultStore[*types.Session](), store.NewDefaultStore[types.BrowserVersions](), nil)
+
+	err := col.Run(context.Background())
+	if err == nil || err.Error() != "browser config event stream closed unexpectedly" {
+		t.Fatalf("expected config stream closed error, got %v", err)
+	}
+}
+
+func TestCollectorRunConfigEventAdded(t *testing.T) {
+	browserStream := &fakeStream{
+		eventsCh: make(chan *event.BrowserEvent, 1),
+		errorsCh: make(chan error, 1),
+	}
+	configStream := &fakeConfigStream{
+		eventsCh: make(chan *event.BrowserConfigEvent, 2),
+		errorsCh: make(chan error, 1),
+	}
+
+	cfgStore := store.NewDefaultStore[types.BrowserVersions]()
+	cl := &fakeClient{stream: browserStream}
+	cfgClient := &fakeConfigClient{stream: configStream}
+
+	col := NewCollector(cl, cfgClient, "default", store.NewDefaultStore[*types.Session](), cfgStore, nil)
+
+	browsers := map[string]map[string]*browserconfigv1.BrowserVersionConfigSpec{
+		"firefox": {"100": {Image: "firefox:100"}},
+	}
+	configStream.eventsCh <- newConfigEvent(event.EventTypeAdded, "cfg-added", browsers)
+	// After config event, close browser stream to end the loop.
+	close(configStream.eventsCh)
+
+	col.Run(context.Background()) //nolint:errcheck
+
+	bv, ok := cfgStore.Get("cfg-added")
+	if !ok {
+		t.Fatalf("expected cfg-added to be in config store")
+	}
+	if _, ok := bv["firefox"]; !ok {
+		t.Fatalf("expected firefox in browser versions")
+	}
+}
+
+func TestCollectorRunConfigEventModified(t *testing.T) {
+	browserStream := &fakeStream{
+		eventsCh: make(chan *event.BrowserEvent, 1),
+		errorsCh: make(chan error, 1),
+	}
+	configStream := &fakeConfigStream{
+		eventsCh: make(chan *event.BrowserConfigEvent, 2),
+		errorsCh: make(chan error, 1),
+	}
+
+	cfgStore := store.NewDefaultStore[types.BrowserVersions]()
+	cfgStore.Set("cfg-modified", types.BrowserVersions{"old-browser": {"1.0"}})
+
+	cl := &fakeClient{stream: browserStream}
+	cfgClient := &fakeConfigClient{stream: configStream}
+
+	col := NewCollector(cl, cfgClient, "default", store.NewDefaultStore[*types.Session](), cfgStore, nil)
+
+	browsers := map[string]map[string]*browserconfigv1.BrowserVersionConfigSpec{
+		"new-browser": {"2.0": {Image: "new:2.0"}},
+	}
+	configStream.eventsCh <- newConfigEvent(event.EventTypeModified, "cfg-modified", browsers)
+	close(configStream.eventsCh)
+
+	col.Run(context.Background()) //nolint:errcheck
+
+	bv, ok := cfgStore.Get("cfg-modified")
+	if !ok {
+		t.Fatalf("expected cfg-modified to be in config store")
+	}
+	if _, ok := bv["new-browser"]; !ok {
+		t.Fatalf("expected new-browser in browser versions after modify")
+	}
+	if _, ok := bv["old-browser"]; ok {
+		t.Fatalf("expected old-browser to be replaced after modify")
+	}
+}
+
+func TestCollectorRunConfigEventDeleted(t *testing.T) {
+	browserStream := &fakeStream{
+		eventsCh: make(chan *event.BrowserEvent, 1),
+		errorsCh: make(chan error, 1),
+	}
+	configStream := &fakeConfigStream{
+		eventsCh: make(chan *event.BrowserConfigEvent, 2),
+		errorsCh: make(chan error, 1),
+	}
+
+	cfgStore := store.NewDefaultStore[types.BrowserVersions]()
+	cfgStore.Set("cfg-del", types.BrowserVersions{"chrome": {"123"}})
+
+	cl := &fakeClient{stream: browserStream}
+	cfgClient := &fakeConfigClient{stream: configStream}
+
+	col := NewCollector(cl, cfgClient, "default", store.NewDefaultStore[*types.Session](), cfgStore, nil)
+
+	configStream.eventsCh <- newConfigEvent(event.EventTypeDeleted, "cfg-del", nil)
+	close(configStream.eventsCh)
+
+	col.Run(context.Background()) //nolint:errcheck
+
+	if _, ok := cfgStore.Get("cfg-del"); ok {
+		t.Fatalf("expected cfg-del to be deleted from config store")
+	}
+}
+
+func TestCollectorRunContextCancelled(t *testing.T) {
+	browserStream := &fakeStream{
+		eventsCh: make(chan *event.BrowserEvent),
+		errorsCh: make(chan error),
+	}
+	cl := &fakeClient{stream: browserStream}
+
+	col := NewCollector(cl, &fakeConfigClient{}, "default", store.NewDefaultStore[*types.Session](), store.NewDefaultStore[types.BrowserVersions](), nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before Run
+
+	err := col.Run(ctx)
+	if err != context.Canceled {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+}
+
+func TestCollectorRunInitialListBrowsersInvalidIP(t *testing.T) {
+	// The initial list of browsers contains one with an invalid IP.
+	now := metav1.NewTime(time.Unix(0, 0).UTC())
+	existing := &browserv1.Browser{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "browser-bad",
+			CreationTimestamp: now,
+		},
+		Spec: browserv1.BrowserSpec{
+			BrowserName:    "chrome",
+			BrowserVersion: "123",
+		},
+		Status: browserv1.BrowserStatus{
+			PodIP: "not-an-ip",
+			Phase: corev1.PodRunning,
+		},
+	}
+
+	cl := &fakeClient{browsers: []*browserv1.Browser{existing}}
+	col := NewCollector(cl, &fakeConfigClient{}, "default", store.NewDefaultStore[*types.Session](), store.NewDefaultStore[types.BrowserVersions](), nil)
+
+	err := col.Run(context.Background())
+	if err == nil || err.Error() != "failed to convert IP to UUID" {
+		t.Fatalf("expected convert error, got %v", err)
+	}
+}
+
+func TestCollectorRunConfigEventsStreamError(t *testing.T) {
+	// configClient.Events returns an error.
+	stream := &fakeStream{
+		eventsCh: make(chan *event.BrowserEvent),
+		errorsCh: make(chan error),
+	}
+	cl := &fakeClient{stream: stream}
+	cfgClient := &fakeConfigClient{eventsErr: errors.New("config events error")}
+
+	col := NewCollector(cl, cfgClient, "default", store.NewDefaultStore[*types.Session](), store.NewDefaultStore[types.BrowserVersions](), nil)
+
+	err := col.Run(context.Background())
+	if err == nil || err.Error() != "config events error" {
+		t.Fatalf("expected config events error, got %v", err)
 	}
 }

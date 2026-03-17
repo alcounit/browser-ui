@@ -11,8 +11,11 @@ import (
 
 	"github.com/alcounit/browser-service/pkg/broadcast"
 	"github.com/alcounit/browser-service/pkg/client"
+	browserclient "github.com/alcounit/browser-service/pkg/client/browser"
+	browserconfigclient "github.com/alcounit/browser-service/pkg/client/browserconfig"
 	"github.com/alcounit/browser-service/pkg/event"
 	"github.com/alcounit/browser-ui/pkg/collector"
+	"github.com/alcounit/browser-ui/pkg/types"
 	"github.com/alcounit/browser-ui/service"
 	"github.com/alcounit/seleniferous/v2/pkg/store"
 	"github.com/alcounit/selenosis/v2/pkg/env"
@@ -37,29 +40,47 @@ func main() {
 
 	addr := env.GetEnvOrDefault("LISTEN_ADDR", ":8080")
 	apiURL := env.GetEnvOrDefault("BROWSER_SERVICE_URL", "http://browser-service:8080")
+	browserStartTimeout := env.GetEnvDurationOrDefault("BROWSER_STARTUP_TIMEOUT", 3*time.Minute)
 	namespace := env.GetEnvOrDefault("BROWSER_NAMESPACE", "default")
 	vncPassword := env.GetEnvOrDefault("VNC_PASSWORD", "secret")
 	staticPath := env.GetEnvOrDefault("UI_STATIC_PATH", "/app/static")
 
-	store := store.NewDefaultStore()
-	browserClient, err := client.NewClient(client.ClientConfig{
+	sessionStore := store.NewDefaultStore[*types.Session]()
+	browserStore := store.NewDefaultStore[types.BrowserVersions]()
+
+	clientConfig := client.ClientConfig{
 		BaseURL:    apiURL,
 		HTTPClient: http.DefaultClient,
 		Logger:     log,
-	})
+	}
 
+	browserClient, err := browserclient.NewClient(clientConfig)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to create Browser client")
 	}
 
+	browserConfigClient, err := browserconfigclient.NewClient(clientConfig)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to create BrowserConfig client")
+	}
+
 	broadcaster := broadcast.NewBroadcaster[event.BrowserEvent](10)
-	client := collector.NewCollector(browserClient, namespace, store, broadcaster)
+	col := collector.NewCollector(browserClient, browserConfigClient, namespace, sessionStore, browserStore, broadcaster)
 
 	collectorCtx := logctx.IntoContext(context.Background(), log)
-	go client.Run(collectorCtx)
+	go func() {
+		for {
+			err := col.Run(collectorCtx)
+			if err == nil || collectorCtx.Err() != nil {
+				return
+			}
+			log.Error().Err(err).Msgf("event collector failed, retrying in 5s")
+			time.Sleep(5 * time.Second)
+		}
+	}()
 	log.Info().Msgf("event collector started, connected to %s", apiURL)
 
-	svc := service.NewService(store)
+	svc := service.NewService(browserClient, namespace, sessionStore, browserStore, browserStartTimeout)
 
 	router := chi.NewRouter()
 	router.Use(middleware.Recoverer)
@@ -83,10 +104,14 @@ func main() {
 	}
 
 	router.Route("/api/v1", func(r chi.Router) {
+		r.Route("/status", func(r chi.Router) {
+			r.Get("/", svc.GetStatus)
+		})
 		r.Route("/browsers", func(r chi.Router) {
-			r.Get("/", svc.ListBrowsers)
+			r.Post("/", svc.CreateBrowser)
 			r.Route("/{browserId}", func(r chi.Router) {
 				r.Get("/", svc.GetBrowser)
+				r.Delete("/", svc.DeleteBrowser)
 				r.HandleFunc("/vnc", svc.RouteVNC)
 				r.HandleFunc("/vnc/settings", func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "application/json")
