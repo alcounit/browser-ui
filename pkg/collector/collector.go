@@ -168,17 +168,15 @@ func storeBrowserConfig(configName string, cfg *browserconfigv1.BrowserConfig, c
 
 func storeSession(sessionId string, browser *browserv1.Browser, c *Collector) {
 	sess := &types.Session{
-		SessionId:      sessionId,
-		BrowserId:      browser.Name,
-		BrowserIP:      browser.Status.PodIP,
-		BrowserName:    browser.Spec.BrowserName,
-		BrowserVersion: browser.Spec.BrowserVersion,
-		StartTime:      browser.CreationTimestamp.DeepCopy(),
-		Phase:          corev1.PodPhase(browser.Status.Phase),
-	}
-
-	if _, exist := browser.Annotations["startedManually"]; exist {
-		sess.StartedManually = true
+		SessionId:       sessionId,
+		BrowserId:       browser.Name,
+		BrowserIP:       browser.Status.PodIP,
+		BrowserName:     browser.Spec.BrowserName,
+		BrowserVersion:  browser.Spec.BrowserVersion,
+		Owner:           browser.Labels[browserv1.SelenosisOwnerLabelKey],
+		StartedManually: browser.Annotations["startedManually"] == "true",
+		StartTime:       browser.CreationTimestamp.DeepCopy(),
+		Phase:           corev1.PodPhase(browser.Status.Phase),
 	}
 
 	c.sessionStore.Set(browser.Name, sess)

@@ -4,3 +4,6 @@ Makefile.local
 out/
 static/
 src/node_modules/
+src/coverage/
+/browser-ui
+*.prof
