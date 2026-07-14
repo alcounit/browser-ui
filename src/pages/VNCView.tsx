@@ -1,7 +1,21 @@
 import React, { useEffect, useRef, useState } from "react";
-import { useParams, Link, useNavigate, useLocation } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import RFB from "@novnc/novnc/lib/rfb";
 import { formatUptime } from "../utils";
+import {
+  newAttemptState,
+  buildLadder,
+  nextCandidate,
+  registerFailure,
+  isHardCapReached,
+} from "../lib/vncAuth";
+import {
+  getSavedByName,
+  setSavedByName,
+  getSavedByVersion,
+  setSavedByVersion,
+} from "../lib/vncStore";
+import { PasswordPromptModal, SavePasswordModal, type SaveScope } from "../components/VncPasswordModals";
 import copyToVncIcon from "../assets/icons/clipboard-paste.svg";
 import copyFromVncIcon from "../assets/icons/clipboard-copy.svg";
 import sendIcon from "../assets/icons/send.svg";
@@ -31,6 +45,106 @@ export const VNCView: React.FC = () => {
   const [pasteText, setPasteText] = useState("");
   const pasteInputRef = useRef<HTMLTextAreaElement | null>(null);
 
+  const browserNameRef = useRef<string>("");
+  const browserVersionRef = useRef<string>("");
+  const attemptRef = useRef(newAttemptState());
+  const ladderRef = useRef<string[]>([]);
+  const pendingPwRef = useRef<string>("");
+  const manualRef = useRef(false);
+  const securityFailedRef = useRef(false);
+  const isMaximizedRef = useRef(false);
+  const createRfbRef = useRef<(password: string, manual: boolean) => void>(() => {});
+
+  const [showPrompt, setShowPrompt] = useState(false);
+  const [promptError, setPromptError] = useState<string | undefined>(undefined);
+  const [showSave, setShowSave] = useState(false);
+  const [notice, setNotice] = useState<string>("");
+
+  const teardownRfb = () => {
+    const current = rfbRef.current;
+    rfbRef.current = null;
+    if (current) {
+      try {
+        current.disconnect();
+      } catch {}
+    }
+  };
+
+  createRfbRef.current = (password: string, manual: boolean) => {
+    if (!id || !containerRef.current) return;
+
+    teardownRfb();
+    manualRef.current = manual;
+    pendingPwRef.current = password;
+    securityFailedRef.current = false;
+    setStatus("Connecting");
+
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    const host = window.location.host;
+    const url = `${protocol}://${host}/api/v1/browsers/${id}/vnc`;
+
+    const rfb: AnyRFB = new (RFB as any)(containerRef.current, url, {
+      scaleViewport: true,
+      resizeSession: false,
+    });
+
+    rfb.addEventListener("credentialsrequired", () => {
+      const pw = pendingPwRef.current;
+      if (typeof rfb.sendCredentials === "function") {
+        rfb.sendCredentials({ password: pw });
+      } else {
+        (rfb as any)._rfb_credentials = { password: pw };
+      }
+    });
+
+    rfb.viewOnly = false;
+    rfb.localCursor = true;
+    rfb.clipViewport = false;
+    rfb.viewportDrag = false;
+
+    rfb.addEventListener("connect", () => {
+      setStatus("Connected");
+      setNotice("");
+      if (manualRef.current) {
+        setShowSave(true);
+      }
+    });
+
+    rfb.addEventListener("securityfailure", (event: any) => {
+      securityFailedRef.current = true;
+      const reason = event?.detail?.reason ?? "authentication failed";
+      attemptRef.current = registerFailure(attemptRef.current, pendingPwRef.current);
+      if (isHardCapReached(attemptRef.current)) {
+        setStatus("Disconnected");
+        setNotice(`VNC auth failed: ${reason}`);
+        return;
+      }
+      const next = nextCandidate(ladderRef.current, attemptRef.current.tried);
+      if (next !== null) {
+        createRfbRef.current(next, false);
+        return;
+      }
+      manualRef.current = true;
+      setPromptError(`VNC auth failed: ${reason}`);
+      setShowPrompt(true);
+    });
+
+    rfb.addEventListener("disconnect", (event: any) => {
+      if (securityFailedRef.current) return;
+      setStatus("Disconnected");
+      if (event?.detail?.clean === false) {
+        setNotice("Connection lost");
+      }
+    });
+
+    rfb.addEventListener("clipboard", (event: any) => {
+      const text = event?.detail?.text ?? "";
+      setLastRemoteClipboard(text);
+    });
+
+    rfbRef.current = rfb;
+  };
+
   useEffect(() => {
     if (!sessionStartTime) return;
 
@@ -46,68 +160,43 @@ export const VNCView: React.FC = () => {
   }, [sessionStartTime, status]);
 
   useEffect(() => {
-    if (!id) return;
-
-    if (sessionStartTime) return;
-
-    fetch(`/api/v1/browsers/${id}`)
-      .then((r) => {
-        if (!r.ok) throw new Error('Failed to fetch session');
-        return r.json();
-      })
-      .then((session: { browserId: string; startTime: string }) => {
-        if (session.browserId === id) {
-          setSessionStartTime(session.startTime);
-        }
-      })
-      .catch(() => {
-      });
-  }, [id, sessionStartTime]);
-
-  useEffect(() => {
     if (!id || !containerRef.current) return;
     if (rfbRef.current) return;
 
-    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const host = window.location.host;
-    const url = `${protocol}://${host}/api/v1/browsers/${id}/vnc`;
+    let cancelled = false;
 
-    const rfb: AnyRFB = new (RFB as any)(containerRef.current, url, {
-      scaleViewport: true,
-      resizeSession: false,
-    });
-
-    rfb.addEventListener("credentialsrequired", async () => {
+    const start = async () => {
       try {
-        const resp = await fetch(`/api/v1/browsers/${id}/vnc/settings`);
-        if (!resp.ok) throw new Error("failed to get password");
-        const { password } = await resp.json();
-
-        if (typeof rfb.sendCredentials === "function") {
-          rfb.sendCredentials({ password });
-        } else {
-          (rfb as any)._rfb_credentials = { password };
+        const resp = await fetch(`/api/v1/browsers/${id}`);
+        if (resp.ok) {
+          const session: { browserId: string; browserName?: string; browserVersion?: string; startTime?: string } = await resp.json();
+          if (session.browserId === id) {
+            browserNameRef.current = session.browserName ?? "";
+            browserVersionRef.current = session.browserVersion ?? "";
+            if (!sessionStartTime && session.startTime) {
+              setSessionStartTime(session.startTime);
+            }
+          }
         }
-      } catch {
-        setStatus("Disconnected");
-        try { rfb.disconnect(); } catch {}
+      } catch {}
+
+      if (cancelled) return;
+
+      ladderRef.current = buildLadder(
+        getSavedByVersion(browserNameRef.current, browserVersionRef.current),
+        getSavedByName(browserNameRef.current),
+      );
+
+      const first = nextCandidate(ladderRef.current, attemptRef.current.tried);
+      if (first !== null) {
+        createRfbRef.current(first, false);
+      } else {
+        manualRef.current = true;
+        setShowPrompt(true);
       }
-    });
+    };
 
-
-    rfb.viewOnly = false;
-    rfb.localCursor = true;
-    rfb.clipViewport = false;
-    rfb.viewportDrag = false;
-
-    rfb.addEventListener("connect", () => setStatus("Connected"));
-    rfb.addEventListener("disconnect", () => setStatus("Disconnected"));
-    rfb.addEventListener("clipboard", (event: any) => {
-      const text = event?.detail?.text ?? "";
-      setLastRemoteClipboard(text);
-    });
-
-    rfbRef.current = rfb;
+    start();
 
     const resizeCanvas = () => {
       if (!rfbRef.current || !containerRef.current) return;
@@ -117,32 +206,36 @@ export const VNCView: React.FC = () => {
       const h = Math.round(rect.height);
 
       try {
-        if (isMaximized && typeof rfbRef.current.requestDesktopSize === "function") {
+        if (isMaximizedRef.current && typeof rfbRef.current.requestDesktopSize === "function") {
           rfbRef.current.requestDesktopSize(w, h);
         } else {
           rfbRef.current.scaleViewport = true;
         }
-      } catch { }
+      } catch {}
     };
 
     window.addEventListener("resize", resizeCanvas);
-    setTimeout(resizeCanvas, 200);
+    const resizeTimer = setTimeout(resizeCanvas, 200);
 
     const handleUnload = () => {
       try {
         rfbRef.current?.disconnect();
-      } catch { }
+      } catch {}
     };
 
     window.addEventListener("beforeunload", handleUnload);
 
     return () => {
+      cancelled = true;
+      clearTimeout(resizeTimer);
       window.removeEventListener("resize", resizeCanvas);
       window.removeEventListener("beforeunload", handleUnload);
+      teardownRfb();
     };
   }, [id]);
 
   useEffect(() => {
+    isMaximizedRef.current = isMaximized;
     if (!rfbRef.current || !containerRef.current) return;
 
     const rect = containerRef.current.getBoundingClientRect();
@@ -155,14 +248,34 @@ export const VNCView: React.FC = () => {
       } else {
         rfbRef.current.scaleViewport = true;
       }
-    } catch { }
+    } catch {}
   }, [isMaximized]);
 
-  const handleClose = () => {
-    try {
-      rfbRef.current?.disconnect();
-    } catch { }
+  const handlePromptSubmit = (password: string) => {
+    setShowPrompt(false);
+    setPromptError(undefined);
+    createRfbRef.current(password, true);
+  };
 
+  const handlePromptCancel = () => {
+    setShowPrompt(false);
+    teardownRfb();
+    setStatus("Disconnected");
+    setNotice("VNC authentication cancelled");
+  };
+
+  const handleSaveChoose = (scope: SaveScope) => {
+    const pw = pendingPwRef.current;
+    if (scope === "name") {
+      setSavedByName(browserNameRef.current, pw);
+    } else if (scope === "version") {
+      setSavedByVersion(browserNameRef.current, browserVersionRef.current, pw);
+    }
+    setShowSave(false);
+  };
+
+  const handleClose = () => {
+    teardownRfb();
     navigate("/ui/");
   };
 
@@ -251,24 +364,6 @@ export const VNCView: React.FC = () => {
     input.focus();
     input.select();
   }, [showPastePrompt]);
-
-  const submitPasteText = (text: string) => {
-    const value = text.trim();
-    if (value && rfbRef.current?.clipboardPasteFrom) {
-      rfbRef.current.clipboardPasteFrom(value);
-      try {
-        rfbRef.current.sendKey(0xFFE3, "ControlLeft", true);
-        rfbRef.current.sendKey(0x0076, "KeyV", true);
-        rfbRef.current.sendKey(0x0076, "KeyV", false);
-        rfbRef.current.sendKey(0xFFE3, "ControlLeft", false);
-      } catch {
-      }
-      setClipboardHint("Pasted to VNC");
-      setTimeout(() => setClipboardHint(""), 2000);
-    }
-    setShowPastePrompt(false);
-    setPasteText("");
-  };
 
   const handlePastePromptChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = event.target.value;
@@ -378,7 +473,9 @@ export const VNCView: React.FC = () => {
           <div className="vnc-container" ref={containerRef} tabIndex={-1}>
             {status !== "Connected" && (
               <div className="vnc-placeholder">
-                {status === "Connecting" ? "Session Loading..." : "Session Disconnected"}
+                {status === "Connecting"
+                  ? "Session Loading..."
+                  : notice || "Session Disconnected"}
               </div>
             )}
             {clipboardHint && (
@@ -409,6 +506,21 @@ export const VNCView: React.FC = () => {
           </footer>
         </section>
       </div>
+
+      {showPrompt && (
+        <PasswordPromptModal
+          onSubmit={handlePromptSubmit}
+          onCancel={handlePromptCancel}
+          errorReason={promptError}
+        />
+      )}
+      {showSave && (
+        <SavePasswordModal
+          browserName={browserNameRef.current}
+          browserVersion={browserVersionRef.current}
+          onChoose={handleSaveChoose}
+        />
+      )}
     </>
   );
 };

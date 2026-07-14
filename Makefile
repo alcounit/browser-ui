@@ -6,8 +6,10 @@ VERSION ?= develop
 EXTRA_TAGS ?=
 PLATFORM ?= linux/amd64
 CONTAINER_TOOL ?= docker
+NPM ?= npm
+UI_DIR ?= src
 
-.PHONY: fmt vet tidy test docker-build docker-push deploy clean show-vars
+.PHONY: fmt vet tidy test test-ui docker-build docker-push deploy clean show-vars
 
 fmt:
 	go fmt ./...
@@ -21,7 +23,10 @@ tidy:
 test:
 	go test -race -count=1 -cover ./...
 
-docker-build: tidy fmt vet test
+test-ui:
+	cd $(UI_DIR) && $(NPM) ci && $(NPM) run test
+
+docker-build: tidy fmt vet test test-ui
 	$(CONTAINER_TOOL) buildx build \
 		--platform $(PLATFORM) \
 		--build-arg VERSION=$(VERSION) \
@@ -50,3 +55,5 @@ show-vars:
 	@echo "VERSION: $(VERSION)"
 	@echo "PLATFORM: $(PLATFORM)"
 	@echo "CONTAINER_TOOL: $(CONTAINER_TOOL)"
+	@echo "NPM: $(NPM)"
+	@echo "UI_DIR: $(UI_DIR)"

@@ -15,6 +15,7 @@ import (
 	logctx "github.com/alcounit/browser-controller/pkg/log"
 	"github.com/alcounit/browser-ui/pkg/types"
 	"github.com/alcounit/seleniferous/v2/pkg/store"
+	"github.com/alcounit/selenosis/v2/pkg/auth"
 	"github.com/alcounit/selenosis/v2/pkg/selenium"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -93,6 +94,15 @@ func (s *Service) GetStatus(rw http.ResponseWriter, req *http.Request) {
 	log := logctx.FromContext(req.Context())
 
 	activeSessions := s.sessionStore.List()
+	if owner, ok := auth.OwnerFrom(req.Context()); ok {
+		filtered := make([]*types.Session, 0, len(activeSessions))
+		for _, sess := range activeSessions {
+			if sess.Owner == owner.Name {
+				filtered = append(filtered, sess)
+			}
+		}
+		activeSessions = filtered
+	}
 	supportedBrowsers := s.configStore.List()
 
 	response := struct {
@@ -151,6 +161,12 @@ func (s *Service) CreateBrowser(rw http.ResponseWriter, req *http.Request) {
 			BrowserName:    request.BrowserName,
 			BrowserVersion: request.BrowserVersion,
 		},
+	}
+
+	if owner, ok := auth.OwnerFrom(req.Context()); ok {
+		template.Labels = map[string]string{
+			browserv1.SelenosisOwnerLabelKey: owner.Name,
+		}
 	}
 
 	var err error

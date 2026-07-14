@@ -2,6 +2,7 @@ import React from "react";
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { formatUptime, getBrowserIcon } from '../utils';
+import { useAuth } from '../App';
 
 const buildNumber = __BUILD_NUMBER__;
 
@@ -25,8 +26,9 @@ interface BrowserGroup {
   versions: string[];
 }
 
-const fetchStatus = async (): Promise<StatusResponse> => {
+const fetchStatus = async (onUnauthorized: () => void): Promise<StatusResponse> => {
   const res = await fetch('/api/v1/status');
+  if (res.status === 401) { onUnauthorized(); throw new Error('unauthorized'); }
   if (!res.ok) throw new Error('Network response was not ok');
   return res.json();
 };
@@ -124,11 +126,19 @@ const VersionList: React.FC<VersionListProps> = ({ versions, browserName, starti
 
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
+  const { authEnabled, onUnauthorized } = useAuth();
 
   const { data, isLoading } = useQuery({
     queryKey: ['status'],
-    queryFn: fetchStatus,
+    queryFn: () => fetchStatus(onUnauthorized),
     refetchInterval: 2000,
+  });
+
+  const logoutMutation = useMutation({
+    mutationFn: async () => {
+      await fetch('/api/v1/auth/logout', { method: 'POST' });
+    },
+    onSuccess: () => navigate('/ui/login', { replace: true }),
   });
   const browsers = data?.activeSessions ?? [];
 
@@ -268,6 +278,16 @@ export const Dashboard: React.FC = () => {
             </div>
           )}
         </div>
+
+        {authEnabled && (
+          <button
+            className="logout-btn"
+            onClick={() => logoutMutation.mutate()}
+            disabled={logoutMutation.isPending}
+          >
+            {logoutMutation.isPending ? 'Signing out…' : 'Sign out'}
+          </button>
+        )}
 
         <div className="header-stats">
           <div className="stat-item">BROWSERS TOTAL: <strong>{stats.total}</strong></div>

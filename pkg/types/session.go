@@ -11,6 +11,7 @@ type Session struct {
 	BrowserIP       string          `json:"-"`
 	BrowserName     string          `json:"browserName"`
 	BrowserVersion  string          `json:"browserVersion"`
+	Owner           string          `json:"owner,omitempty"`
 	StartedManually bool            `json:"startedManually"`
 	StartTime       *metav1.Time    `json:"startTime"`
 	Phase           corev1.PodPhase `json:"phase"`

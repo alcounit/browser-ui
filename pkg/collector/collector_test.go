@@ -575,6 +575,65 @@ func TestCollectorRunInitialListBrowsersInvalidIP(t *testing.T) {
 	}
 }
 
+func TestStoreSessionSetsOwnerFromLabel(t *testing.T) {
+	stream := &fakeStream{
+		eventsCh: make(chan *event.BrowserEvent, 1),
+		errorsCh: make(chan error, 1),
+	}
+	client := &fakeClient{stream: stream}
+	st := store.NewDefaultStore[*types.Session]()
+	col := NewCollector(client, &fakeConfigClient{}, "default", st, store.NewDefaultStore[types.BrowserVersions](), nil)
+
+	now := metav1.NewTime(time.Unix(0, 0).UTC())
+	ev := &event.BrowserEvent{
+		EventType: event.EventTypeAdded,
+		Browser: &browserv1.Browser{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "browser-owned",
+				CreationTimestamp: now,
+				Labels:            map[string]string{browserv1.SelenosisOwnerLabelKey: "alice"},
+			},
+			Spec:   browserv1.BrowserSpec{BrowserName: "chrome", BrowserVersion: "123"},
+			Status: browserv1.BrowserStatus{PodIP: "127.0.0.1", Phase: corev1.PodRunning},
+		},
+	}
+	stream.eventsCh <- ev
+	close(stream.eventsCh)
+
+	col.Run(context.Background()) //nolint:errcheck
+
+	sess, ok := st.Get("browser-owned")
+	if !ok {
+		t.Fatal("expected browser-owned to be stored")
+	}
+	if sess.Owner != "alice" {
+		t.Fatalf("expected owner alice, got %q", sess.Owner)
+	}
+}
+
+func TestStoreSessionNoOwnerLabel(t *testing.T) {
+	stream := &fakeStream{
+		eventsCh: make(chan *event.BrowserEvent, 1),
+		errorsCh: make(chan error, 1),
+	}
+	client := &fakeClient{stream: stream}
+	st := store.NewDefaultStore[*types.Session]()
+	col := NewCollector(client, &fakeConfigClient{}, "default", st, store.NewDefaultStore[types.BrowserVersions](), nil)
+
+	stream.eventsCh <- newBrowserEvent(event.EventTypeAdded, "browser-noowner", "127.0.0.1")
+	close(stream.eventsCh)
+
+	col.Run(context.Background()) //nolint:errcheck
+
+	sess, ok := st.Get("browser-noowner")
+	if !ok {
+		t.Fatal("expected browser-noowner to be stored")
+	}
+	if sess.Owner != "" {
+		t.Fatalf("expected empty owner, got %q", sess.Owner)
+	}
+}
+
 func TestCollectorRunConfigEventsStreamError(t *testing.T) {
 	// configClient.Events returns an error.
 	stream := &fakeStream{

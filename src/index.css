@@ -441,6 +441,71 @@ body {
 .status-connected { color: var(--success); font-weight: 600; }
 .status-disconnected { color: #ff5f57; font-weight: 600; }
 
+.logout-btn {
+  background: transparent; color: var(--text-secondary);
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 7px 14px; font-size: 13px; font-weight: 600;
+  cursor: pointer; white-space: nowrap; margin-left: 16px;
+  transition: background 0.2s, color 0.2s;
+}
+.logout-btn:hover:not(:disabled) { background: var(--border); color: var(--text); }
+.logout-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.login-page {
+  height: 100vh; display: flex; align-items: center; justify-content: center;
+  background: var(--bg);
+}
+
+.login-card {
+  background: var(--surface); backdrop-filter: blur(20px);
+  border-radius: 20px; padding: 40px 40px 36px;
+  box-shadow: var(--shadow-large); border: 1px solid var(--border);
+  width: 100%; max-width: 360px;
+}
+
+.login-title {
+  font-size: 18px; font-weight: 700; letter-spacing: -0.4px;
+  text-align: center; margin-bottom: 28px; color: var(--text);
+}
+
+.login-form { display: flex; flex-direction: column; gap: 16px; }
+
+.login-field { display: flex; flex-direction: column; gap: 6px; }
+
+.login-label { font-size: 13px; font-weight: 500; color: var(--text-secondary); }
+
+.login-input {
+  padding: 10px 14px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--surface);
+  font-size: 15px; color: var(--text); outline: none;
+  transition: border-color 0.2s;
+}
+.login-input:focus { border-color: var(--primary); }
+.login-input:disabled { opacity: 0.6; }
+
+.login-error {
+  background: rgba(255, 95, 87, 0.1); color: #ff5f57;
+  border: 1px solid rgba(255, 95, 87, 0.3); border-radius: 10px;
+  padding: 10px 14px; font-size: 13px;
+}
+
+.login-btn {
+  margin-top: 4px; padding: 11px; border-radius: 10px;
+  background: var(--primary); color: white; border: none;
+  font-size: 15px; font-weight: 600; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  min-height: 44px; transition: background 0.2s;
+}
+.login-btn:hover:not(:disabled) { background: var(--primary-hover); }
+.login-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.login-spinner {
+  width: 18px; height: 18px; border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.4);
+  border-top-color: white;
+  animation: spin 0.7s linear infinite;
+}
+
 @media (max-width: 900px) {
   .vnc-window {
     width: 92%;
@@ -448,3 +513,62 @@ body {
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   }
 }
+
+.vnc-modal-overlay {
+  position: fixed; inset: 0; z-index: 11000;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  padding: 20px;
+}
+
+.vnc-modal {
+  background: var(--surface); backdrop-filter: blur(20px);
+  border-radius: 16px; padding: 24px;
+  box-shadow: var(--shadow-large); border: 1px solid var(--border);
+  width: 100%; max-width: 340px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+
+.vnc-modal-title {
+  font-size: 16px; font-weight: 700; letter-spacing: -0.3px;
+  color: var(--text);
+}
+
+.vnc-modal-error {
+  background: rgba(255, 95, 87, 0.1); color: #ff5f57;
+  border: 1px solid rgba(255, 95, 87, 0.3); border-radius: 10px;
+  padding: 8px 12px; font-size: 13px;
+}
+
+.vnc-modal-warn {
+  background: rgba(255, 159, 10, 0.12); color: #b25b00;
+  border: 1px solid rgba(255, 159, 10, 0.3); border-radius: 10px;
+  padding: 8px 12px; font-size: 13px;
+}
+
+.vnc-modal-input {
+  padding: 10px 14px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--surface);
+  font-size: 15px; color: var(--text); outline: none;
+  transition: border-color 0.2s;
+}
+.vnc-modal-input:focus { border-color: var(--primary); }
+
+.vnc-modal-actions {
+  display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end;
+}
+
+.vnc-modal-btn {
+  padding: 9px 16px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--surface);
+  font-size: 14px; font-weight: 600; color: var(--text);
+  cursor: pointer; transition: background 0.2s, border-color 0.2s;
+}
+.vnc-modal-btn:hover:not(:disabled) { background: rgba(0, 0, 0, 0.04); }
+.vnc-modal-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.vnc-modal-btn[type="submit"] {
+  background: var(--primary); color: #fff; border-color: var(--primary);
+}
+.vnc-modal-btn[type="submit"]:hover:not(:disabled) { background: var(--primary-hover); }

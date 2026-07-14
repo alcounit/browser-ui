@@ -2,11 +2,15 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"mime"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/alcounit/browser-service/pkg/broadcast"
@@ -18,6 +22,7 @@ import (
 	"github.com/alcounit/browser-ui/pkg/types"
 	"github.com/alcounit/browser-ui/service"
 	"github.com/alcounit/seleniferous/v2/pkg/store"
+	"github.com/alcounit/selenosis/v2/pkg/auth"
 	"github.com/alcounit/selenosis/v2/pkg/env"
 	"github.com/rs/zerolog"
 
@@ -33,17 +38,54 @@ func init() {
 	mime.AddExtensionType(".css", "text/css")
 }
 
+func cookieAuthMiddleware(authStore *auth.AuthStore, log zerolog.Logger) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+			cookie, err := req.Cookie("browser_ui_auth")
+			if err != nil {
+				http.Error(rw, "authentication required", http.StatusUnauthorized)
+				return
+			}
+			decoded, err := base64.StdEncoding.DecodeString(cookie.Value)
+			if err != nil {
+				http.Error(rw, "authentication required", http.StatusUnauthorized)
+				return
+			}
+			parts := strings.SplitN(string(decoded), ":", 2)
+			if len(parts) != 2 || !authStore.Authenticate(parts[0], parts[1]) {
+				log.Error().Msg("request authentication failed")
+				http.Error(rw, "authentication failed", http.StatusUnauthorized)
+				return
+			}
+			req = req.WithContext(auth.WithOwner(req.Context(), auth.Owner{Name: parts[0]}))
+			next.ServeHTTP(rw, req)
+		})
+	}
+}
+
 func main() {
 	zerolog.TimeFieldFormat = time.RFC3339
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	log := zerolog.New(os.Stdout).With().Timestamp().Logger()
 
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	addr := env.GetEnvOrDefault("LISTEN_ADDR", ":8080")
 	apiURL := env.GetEnvOrDefault("BROWSER_SERVICE_URL", "http://browser-service:8080")
 	browserStartTimeout := env.GetEnvDurationOrDefault("BROWSER_STARTUP_TIMEOUT", 3*time.Minute)
 	namespace := env.GetEnvOrDefault("BROWSER_NAMESPACE", "default")
-	vncPassword := env.GetEnvOrDefault("VNC_PASSWORD", "secret")
 	staticPath := env.GetEnvOrDefault("UI_STATIC_PATH", "/app/static")
+
+	var authStore *auth.AuthStore
+	if authFilePath := env.GetEnvOrDefault("BASIC_AUTH_FILE", ""); authFilePath != "" {
+		var err error
+		if authStore, err = auth.LoadFromJSONFile(authFilePath); err != nil {
+			log.Fatal().Err(err).Str("path", authFilePath).Msg("BASIC_AUTH_FILE load error")
+		}
+		go auth.Watch(ctx, authStore)
+		log.Info().Str("path", authFilePath).Msg("basic auth enabled")
+	}
 
 	sessionStore := store.NewDefaultStore[*types.Session]()
 	browserStore := store.NewDefaultStore[types.BrowserVersions]()
@@ -67,7 +109,7 @@ func main() {
 	broadcaster := broadcast.NewBroadcaster[event.BrowserEvent](10)
 	col := collector.NewCollector(browserClient, browserConfigClient, namespace, sessionStore, browserStore, broadcaster)
 
-	collectorCtx := logctx.IntoContext(context.Background(), log)
+	collectorCtx := logctx.IntoContext(ctx, log)
 	go func() {
 		for {
 			err := col.Run(collectorCtx)
@@ -104,22 +146,70 @@ func main() {
 	}
 
 	router.Route("/api/v1", func(r chi.Router) {
-		r.Route("/status", func(r chi.Router) {
-			r.Get("/", svc.GetStatus)
+		r.Get("/auth/config", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(map[string]bool{"authEnabled": authStore != nil}); err != nil {
+				http.Error(w, "failed to encode response", http.StatusInternalServerError)
+			}
 		})
-		r.Route("/browsers", func(r chi.Router) {
-			r.Post("/", svc.CreateBrowser)
-			r.Route("/{browserId}", func(r chi.Router) {
-				r.Get("/", svc.GetBrowser)
-				r.Delete("/", svc.DeleteBrowser)
-				r.HandleFunc("/vnc", svc.RouteVNC)
-				r.HandleFunc("/vnc/settings", func(w http.ResponseWriter, r *http.Request) {
-					w.Header().Set("Content-Type", "application/json")
-					if err := json.NewEncoder(w).Encode(map[string]string{"password": vncPassword}); err != nil {
-						log.Error().Err(err).Msg("failed to encode password response")
-						http.Error(w, "failed to encode response", http.StatusInternalServerError)
-						return
-					}
+
+		r.Post("/auth/login", func(w http.ResponseWriter, req *http.Request) {
+			if req.Body == nil {
+				http.Error(w, "request body required", http.StatusBadRequest)
+				return
+			}
+			defer req.Body.Close()
+			var creds struct {
+				Username string `json:"username"`
+				Password string `json:"password"`
+			}
+			if err := json.NewDecoder(req.Body).Decode(&creds); err != nil {
+				http.Error(w, "invalid request", http.StatusBadRequest)
+				return
+			}
+			if authStore != nil && !authStore.Authenticate(creds.Username, creds.Password) {
+				log.Error().Str("username", creds.Username).Msg("login failed")
+				http.Error(w, "invalid credentials", http.StatusUnauthorized)
+				return
+			}
+			if authStore != nil {
+				token := base64.StdEncoding.EncodeToString([]byte(creds.Username + ":" + creds.Password))
+				http.SetCookie(w, &http.Cookie{
+					Name:     "browser_ui_auth",
+					Value:    token,
+					Path:     "/",
+					HttpOnly: true,
+					SameSite: http.SameSiteStrictMode,
+				})
+			}
+			w.WriteHeader(http.StatusOK)
+		})
+
+		r.Post("/auth/logout", func(w http.ResponseWriter, _ *http.Request) {
+			http.SetCookie(w, &http.Cookie{
+				Name:     "browser_ui_auth",
+				Value:    "",
+				Path:     "/",
+				HttpOnly: true,
+				MaxAge:   -1,
+				SameSite: http.SameSiteStrictMode,
+			})
+			w.WriteHeader(http.StatusOK)
+		})
+
+		r.Group(func(r chi.Router) {
+			if authStore != nil {
+				r.Use(cookieAuthMiddleware(authStore, log))
+			}
+			r.Route("/status", func(r chi.Router) {
+				r.Get("/", svc.GetStatus)
+			})
+			r.Route("/browsers", func(r chi.Router) {
+				r.Post("/", svc.CreateBrowser)
+				r.Route("/{browserId}", func(r chi.Router) {
+					r.Get("/", svc.GetBrowser)
+					r.Delete("/", svc.DeleteBrowser)
+					r.HandleFunc("/vnc", svc.RouteVNC)
 				})
 			})
 		})
@@ -143,7 +233,25 @@ func main() {
 		w.Write([]byte(`{"status":"ok"}`))
 	})
 
-	if err := http.ListenAndServe(addr, router); err != nil {
-		log.Fatal().Err(err).Msg("Server failed")
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: router,
+	}
+
+	go func() {
+		log.Info().Msgf("HTTP server listening %s", addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatal().Err(err).Msg("Server failed")
+		}
+	}()
+
+	<-ctx.Done()
+	stop()
+	log.Info().Msg("Shutting down...")
+
+	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Error().Err(err).Msg("Server shutdown error")
 	}
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/alcounit/browser-service/pkg/event"
 	"github.com/alcounit/browser-ui/pkg/types"
 	"github.com/alcounit/seleniferous/v2/pkg/store"
+	"github.com/alcounit/selenosis/v2/pkg/auth"
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -541,18 +542,19 @@ func TestIsNormalWSDisconnect(t *testing.T) {
 
 // fakeBrowserClient implements browserclient.Client for testing.
 type fakeBrowserClient struct {
-	createErr error
-	browser   *browserv1.Browser
+	createErr   error
+	browser     *browserv1.Browser
+	lastCreated *browserv1.Browser
 }
 
 func (c *fakeBrowserClient) Create(ctx context.Context, namespace string, browser *browserv1.Browser) (*browserv1.Browser, error) {
+	c.lastCreated = browser
 	if c.createErr != nil {
 		return nil, c.createErr
 	}
 	if c.browser != nil {
 		return c.browser, nil
 	}
-	// Return the browser with the same name as provided.
 	return browser, nil
 }
 
@@ -929,10 +931,266 @@ func TestSetSelenosisOptionsExistingAnnotations(t *testing.T) {
 }
 
 func TestSetSelenosisOptionsMarshalError(t *testing.T) {
-	// Use a channel value inside opts to trigger json.Marshal error.
 	opts := map[string]any{"key": make(chan int)}
 	_, err := setSelenosisOptions(nil, opts)
 	if err == nil {
 		t.Fatalf("expected marshal error, got nil")
+	}
+}
+
+func TestCreateBrowserSetsOwnerLabel(t *testing.T) {
+	st := store.NewDefaultStore[*types.Session]()
+
+	now := metav1.Now()
+	returnedBrowser := &browserv1.Browser{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "browser-owner",
+			CreationTimestamp: now,
+		},
+	}
+
+	st.Set("browser-owner", &types.Session{
+		SessionId: "sess-owner",
+		BrowserId: "browser-owner",
+		BrowserIP: "127.0.0.1",
+	})
+
+	cl := &fakeBrowserClient{browser: returnedBrowser}
+	svc := NewService(cl, "default", st, store.NewDefaultStore[types.BrowserVersions](), 5*time.Second)
+
+	prevHTTPClient := httpClient
+	httpClient = &mockTransport{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader("")),
+	}}
+	defer func() { httpClient = prevHTTPClient }()
+
+	body := `{"browserName":"chrome","browserVersion":"123"}`
+	req := httptest.NewRequest(http.MethodPost, "/browsers", strings.NewReader(body))
+	req = req.WithContext(auth.WithOwner(req.Context(), auth.Owner{Name: "alice"}))
+	rw := httptest.NewRecorder()
+
+	svc.CreateBrowser(rw, req)
+
+	if rw.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rw.Code)
+	}
+	if cl.lastCreated == nil {
+		t.Fatal("expected browser to be captured")
+	}
+	if cl.lastCreated.Labels[browserv1.SelenosisOwnerLabelKey] != "alice" {
+		t.Fatalf("expected owner label alice, got %q", cl.lastCreated.Labels[browserv1.SelenosisOwnerLabelKey])
+	}
+}
+
+func TestCreateBrowserNoOwnerLabel(t *testing.T) {
+	st := store.NewDefaultStore[*types.Session]()
+
+	now := metav1.Now()
+	returnedBrowser := &browserv1.Browser{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "browser-noowner",
+			CreationTimestamp: now,
+		},
+	}
+
+	st.Set("browser-noowner", &types.Session{
+		SessionId: "sess-noowner",
+		BrowserId: "browser-noowner",
+		BrowserIP: "127.0.0.1",
+	})
+
+	cl := &fakeBrowserClient{browser: returnedBrowser}
+	svc := NewService(cl, "default", st, store.NewDefaultStore[types.BrowserVersions](), 5*time.Second)
+
+	prevHTTPClient := httpClient
+	httpClient = &mockTransport{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader("")),
+	}}
+	defer func() { httpClient = prevHTTPClient }()
+
+	body := `{"browserName":"chrome","browserVersion":"123"}`
+	req := httptest.NewRequest(http.MethodPost, "/browsers", strings.NewReader(body))
+	rw := httptest.NewRecorder()
+
+	svc.CreateBrowser(rw, req)
+
+	if rw.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rw.Code)
+	}
+	if cl.lastCreated == nil {
+		t.Fatal("expected browser to be captured")
+	}
+	if len(cl.lastCreated.Labels) != 0 {
+		t.Fatalf("expected no labels, got %v", cl.lastCreated.Labels)
+	}
+}
+
+func TestGetStatusFiltersSessionsByOwner(t *testing.T) {
+	st := store.NewDefaultStore[*types.Session]()
+	st.Set("b-alice", &types.Session{SessionId: "s1", BrowserId: "b-alice", Owner: "alice"})
+	st.Set("b-bob", &types.Session{SessionId: "s2", BrowserId: "b-bob", Owner: "bob"})
+	st.Set("b-alice2", &types.Session{SessionId: "s3", BrowserId: "b-alice2", Owner: "alice"})
+
+	svc := NewService(nil, "", st, store.NewDefaultStore[types.BrowserVersions](), 5*time.Second)
+	req := httptest.NewRequest(http.MethodGet, "/status", nil)
+	req = req.WithContext(auth.WithOwner(req.Context(), auth.Owner{Name: "alice"}))
+	rw := httptest.NewRecorder()
+
+	svc.GetStatus(rw, req)
+
+	if rw.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rw.Code)
+	}
+
+	var got struct {
+		Sessions []*types.Session `json:"activeSessions"`
+	}
+	if err := json.Unmarshal(rw.Body.Bytes(), &got); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(got.Sessions) != 2 {
+		t.Fatalf("expected 2 sessions for alice, got %d", len(got.Sessions))
+	}
+	for _, s := range got.Sessions {
+		if s.Owner != "alice" {
+			t.Fatalf("expected owner alice, got %s", s.Owner)
+		}
+	}
+}
+
+func TestGetStatusNoFilterWithoutOwner(t *testing.T) {
+	st := store.NewDefaultStore[*types.Session]()
+	st.Set("b-alice", &types.Session{SessionId: "s1", BrowserId: "b-alice", Owner: "alice"})
+	st.Set("b-bob", &types.Session{SessionId: "s2", BrowserId: "b-bob", Owner: "bob"})
+
+	svc := NewService(nil, "", st, store.NewDefaultStore[types.BrowserVersions](), 5*time.Second)
+	req := httptest.NewRequest(http.MethodGet, "/status", nil)
+	rw := httptest.NewRecorder()
+
+	svc.GetStatus(rw, req)
+
+	if rw.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rw.Code)
+	}
+
+	var got struct {
+		Sessions []*types.Session `json:"activeSessions"`
+	}
+	if err := json.Unmarshal(rw.Body.Bytes(), &got); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(got.Sessions) != 2 {
+		t.Fatalf("expected 2 sessions (no filter), got %d", len(got.Sessions))
+	}
+}
+
+func TestDeleteBrowserNotFound(t *testing.T) {
+	svc := NewService(nil, "", store.NewDefaultStore[*types.Session](), store.NewDefaultStore[types.BrowserVersions](), 5*time.Second)
+	req := requestWithParam(http.MethodDelete, "/browsers/missing", "browserId", "missing")
+	rw := httptest.NewRecorder()
+
+	svc.DeleteBrowser(rw, req)
+
+	if rw.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d", rw.Code)
+	}
+}
+
+func TestDeleteBrowserNotManual(t *testing.T) {
+	st := store.NewDefaultStore[*types.Session]()
+	st.Set("b1", &types.Session{BrowserId: "b1", StartedManually: false})
+
+	svc := NewService(nil, "", st, store.NewDefaultStore[types.BrowserVersions](), 5*time.Second)
+	req := requestWithParam(http.MethodDelete, "/browsers/b1", "browserId", "b1")
+	rw := httptest.NewRecorder()
+
+	svc.DeleteBrowser(rw, req)
+
+	if rw.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", rw.Code)
+	}
+}
+
+func TestDeleteBrowserHTTPClientError(t *testing.T) {
+	st := store.NewDefaultStore[*types.Session]()
+	st.Set("b1", &types.Session{BrowserId: "b1", BrowserIP: "127.0.0.1", SessionId: "s1", StartedManually: true})
+
+	svc := NewService(nil, "", st, store.NewDefaultStore[types.BrowserVersions](), 5*time.Second)
+
+	prevHTTPClient := httpClient
+	httpClient = &mockTransport{err: errors.New("http error")}
+	defer func() { httpClient = prevHTTPClient }()
+
+	req := requestWithParam(http.MethodDelete, "/browsers/b1", "browserId", "b1")
+	rw := httptest.NewRecorder()
+
+	svc.DeleteBrowser(rw, req)
+
+	if rw.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status 500, got %d", rw.Code)
+	}
+}
+
+func TestDeleteBrowserBackend500(t *testing.T) {
+	st := store.NewDefaultStore[*types.Session]()
+	st.Set("b1", &types.Session{BrowserId: "b1", BrowserIP: "127.0.0.1", SessionId: "s1", StartedManually: true})
+
+	svc := NewService(nil, "", st, store.NewDefaultStore[types.BrowserVersions](), 5*time.Second)
+
+	prevHTTPClient := httpClient
+	httpClient = &mockTransport{resp: &http.Response{
+		StatusCode: http.StatusInternalServerError,
+		Body:       io.NopCloser(strings.NewReader("")),
+	}}
+	defer func() { httpClient = prevHTTPClient }()
+
+	req := requestWithParam(http.MethodDelete, "/browsers/b1", "browserId", "b1")
+	rw := httptest.NewRecorder()
+
+	svc.DeleteBrowser(rw, req)
+
+	if rw.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status 500, got %d", rw.Code)
+	}
+}
+
+func TestDeleteBrowserSuccess(t *testing.T) {
+	st := store.NewDefaultStore[*types.Session]()
+	st.Set("b1", &types.Session{BrowserId: "b1", BrowserIP: "127.0.0.1", SessionId: "s1", StartedManually: true})
+
+	svc := NewService(nil, "", st, store.NewDefaultStore[types.BrowserVersions](), 5*time.Second)
+
+	prevHTTPClient := httpClient
+	httpClient = &mockTransport{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader("")),
+	}}
+	defer func() { httpClient = prevHTTPClient }()
+
+	req := requestWithParam(http.MethodDelete, "/browsers/b1", "browserId", "b1")
+	rw := httptest.NewRecorder()
+
+	svc.DeleteBrowser(rw, req)
+
+	if rw.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rw.Code)
+	}
+}
+
+func TestDeleteBrowserBuildRequestError(t *testing.T) {
+	st := store.NewDefaultStore[*types.Session]()
+	st.Set("b1", &types.Session{BrowserId: "b1", BrowserIP: "127.0.0.1\x01", SessionId: "s1", StartedManually: true})
+
+	svc := NewService(nil, "", st, store.NewDefaultStore[types.BrowserVersions](), 5*time.Second)
+
+	req := requestWithParam(http.MethodDelete, "/browsers/b1", "browserId", "b1")
+	rw := httptest.NewRecorder()
+
+	svc.DeleteBrowser(rw, req)
+
+	if rw.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status 500, got %d", rw.Code)
 	}
 }
