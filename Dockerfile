@@ -1,4 +1,4 @@
-FROM node:22-alpine AS ui-builder
+FROM --platform=$BUILDPLATFORM node:22-alpine AS ui-builder
 ARG VERSION=develop
 ENV VERSION=$VERSION
 WORKDIR /src
@@ -7,13 +7,14 @@ RUN npm ci --prefix ./src
 COPY src/ ./src/
 RUN npm run build --prefix ./src
 
-FROM golang:1.25.0 AS go-builder
+FROM --platform=$BUILDPLATFORM golang:1.25.0 AS go-builder
+ARG TARGETOS
+ARG TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-ENV CGO_ENABLED=0 GOOS=linux GOARCH=amd64
-RUN go build -trimpath -ldflags="-s -w" -o /out/browser-ui ./cmd/browser-ui
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -ldflags="-s -w" -o /out/browser-ui ./cmd/browser-ui
 
 FROM gcr.io/distroless/static:nonroot
 WORKDIR /app
