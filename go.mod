@@ -3,10 +3,10 @@ module github.com/alcounit/browser-ui
 go 1.25.0
 
 require (
-	github.com/alcounit/browser-controller v0.0.8
-	github.com/alcounit/browser-service v0.0.7
-	github.com/alcounit/seleniferous/v2 v2.0.7
-	github.com/alcounit/selenosis/v2 v2.0.8
+	github.com/alcounit/browser-controller v1.0.0
+	github.com/alcounit/browser-service v0.0.9
+	github.com/alcounit/seleniferous/v2 v2.0.9
+	github.com/alcounit/selenosis/v2 v2.1.0
 	github.com/go-chi/chi v1.5.5
 	github.com/go-chi/chi/v5 v5.2.3
 	github.com/google/uuid v1.6.0
