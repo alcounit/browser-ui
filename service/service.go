@@ -10,27 +10,24 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	logctx "github.com/alcounit/browser-controller/pkg/log"
 	"github.com/alcounit/browser-ui/pkg/types"
 	"github.com/alcounit/seleniferous/v2/pkg/store"
 	"github.com/alcounit/selenosis/v2/pkg/auth"
 	"github.com/alcounit/selenosis/v2/pkg/selenium"
-	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
 	"github.com/go-chi/chi/v5"
 
 	browserv1 "github.com/alcounit/browser-controller/apis/browser/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	browserclient "github.com/alcounit/browser-service/pkg/client/browser"
 )
 
 type Service struct {
-	namespace           string
-	client              browserclient.Client
+	selenosisURL        string
 	sessionStore        store.Store[*types.Session]
 	configStore         store.Store[types.BrowserVersions]
 	browserStartTimeout time.Duration
@@ -55,14 +52,22 @@ var wsDial = func(target string) (wsConn, error) {
 	return conn, err
 }
 
+const wdHubSessionPath = "/session"
+
+var vncProbeTimeout = 5 * time.Second
+
+const (
+	maxHubResponseBody = 1 << 20
+	maxHubErrorReason  = 512
+)
+
 var httpClient interface {
 	Do(*http.Request) (*http.Response, error)
 } = http.DefaultClient
 
-func NewService(client browserclient.Client, namespace string, sessionStore store.Store[*types.Session], configStore store.Store[types.BrowserVersions], browserStartTimeout time.Duration) *Service {
+func NewService(selenosisURL string, sessionStore store.Store[*types.Session], configStore store.Store[types.BrowserVersions], browserStartTimeout time.Duration) *Service {
 	return &Service{
-		namespace:           namespace,
-		client:              client,
+		selenosisURL:        selenosisURL,
 		sessionStore:        sessionStore,
 		configStore:         configStore,
 		browserStartTimeout: browserStartTimeout,
@@ -87,7 +92,7 @@ func (s Service) GetBrowser(rw http.ResponseWriter, req *http.Request) {
 		http.Error(rw, "failed to encode response", http.StatusInternalServerError)
 		return
 	}
-	log.Info().Str("browserId", browserId).Msg("session retrived")
+	log.Info().Str("browserId", browserId).Str("browserName", session.BrowserName).Str("browserVersion", session.BrowserVersion).Msg("session retrived")
 }
 
 func (s *Service) GetStatus(rw http.ResponseWriter, req *http.Request) {
@@ -127,7 +132,7 @@ func (s *Service) CreateBrowser(rw http.ResponseWriter, req *http.Request) {
 
 	if req.Body == nil {
 		log.Error().Msg("request body is required")
-		http.Error(rw, "request body is required", http.StatusBadRequest)
+		writeBrowserError(rw, http.StatusBadRequest, "request body is required", "")
 		return
 	}
 	defer req.Body.Close()
@@ -140,65 +145,49 @@ func (s *Service) CreateBrowser(rw http.ResponseWriter, req *http.Request) {
 
 	if err := json.NewDecoder(req.Body).Decode(&request); err != nil {
 		log.Error().Err(err).Msg("failed to decode create browser request")
-		http.Error(rw, "invalid request body", http.StatusBadRequest)
+		writeBrowserError(rw, http.StatusBadRequest, "invalid request body", err.Error())
 		return
 	}
 
 	if request.BrowserName == "" || request.BrowserVersion == "" {
 		log.Error().Msg("browserName and browserVersion are required")
-		http.Error(rw, "browserName and browserVersion are required", http.StatusBadRequest)
+		writeBrowserError(rw, http.StatusBadRequest, "browserName and browserVersion are required", "")
 		return
 	}
 
-	template := browserv1.Browser{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: uuid.NewString(),
-			Annotations: map[string]string{
-				"startedManually": "true",
-			},
-		},
-		Spec: browserv1.BrowserSpec{
-			BrowserName:    request.BrowserName,
-			BrowserVersion: request.BrowserVersion,
-		},
+	opts := map[string]any{}
+	for k, v := range request.SelenosisOptions {
+		opts[k] = v
 	}
 
-	if owner, ok := auth.OwnerFrom(req.Context()); ok {
-		template.Labels = map[string]string{
-			browserv1.SelenosisOwnerLabelKey: owner.Name,
+	annotations := map[string]string{"startedManually": "true"}
+	if raw, ok := opts["annotations"].(map[string]any); ok {
+		for k, v := range raw {
+			if s, ok := v.(string); ok {
+				annotations[k] = s
+			}
 		}
 	}
+	opts["annotations"] = annotations
 
-	var err error
-	template.ObjectMeta.Annotations, err = setSelenosisOptions(template.ObjectMeta.Annotations, request.SelenosisOptions)
-	if err != nil {
-		log.Error().Err(err).Msg("failed to set selenosis options annotation")
-		http.Error(rw, "invalid selenosis options", http.StatusBadRequest)
-		return
-	}
-
-	browser, err := s.client.Create(req.Context(), s.namespace, &template)
-	if err != nil {
-		log.Error().Err(err).Msg("failed to create browser")
-		http.Error(rw, "failed to create browser", http.StatusInternalServerError)
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(req.Context(), s.browserStartTimeout)
-	defer cancel()
-
-	session, err := waitForSession(ctx, browser.GetName(), s.sessionStore)
-	if err != nil {
-		log.Error().Err(err).Str("browserName", request.BrowserName).Msg("session did not become available in time")
-		http.Error(rw, "session did not become available in time", http.StatusInternalServerError)
-		return
+	if owner, ok := auth.OwnerFrom(req.Context()); ok {
+		labels := map[string]string{browserv1.SelenosisOwnerLabelKey: owner.Name}
+		if raw, ok := opts["labels"].(map[string]any); ok {
+			for k, v := range raw {
+				if s, ok := v.(string); ok && k != browserv1.SelenosisOwnerLabelKey {
+					labels[k] = s
+				}
+			}
+		}
+		opts["labels"] = labels
 	}
 
 	createReq := selenium.CreateSessionRequest{
 		Capabilities: map[string]selenium.Capabilities{
 			"alwaysMatch": {
-				"browserName":    request.BrowserName,
-				"browserVersion": request.BrowserVersion,
+				"browserName":       request.BrowserName,
+				"browserVersion":    request.BrowserVersion,
+				"selenosis:options": opts,
 			},
 		},
 	}
@@ -206,22 +195,18 @@ func (s *Service) CreateBrowser(rw http.ResponseWriter, req *http.Request) {
 	raw, err := json.Marshal(createReq)
 	if err != nil {
 		log.Error().Err(err).Msg("failed to marshal create session request")
-		http.Error(rw, "failed to create browser", http.StatusInternalServerError)
+		writeBrowserError(rw, http.StatusInternalServerError, "failed to create browser", err.Error())
 		return
 	}
 
-	reqBody := bytes.NewBuffer(raw)
+	ctx, cancel := context.WithTimeout(req.Context(), s.browserStartTimeout)
+	defer cancel()
 
-	reqUrl := &url.URL{
-		Scheme: "http",
-		Host:   net.JoinHostPort(session.BrowserIP, "4445"),
-		Path:   "/session",
-	}
-
-	innerReq, err := http.NewRequestWithContext(req.Context(), http.MethodPost, reqUrl.String(), reqBody)
+	url := s.selenosisURL + wdHubSessionPath
+	innerReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(raw))
 	if err != nil {
 		log.Error().Err(err).Msg("failed to build create session request")
-		http.Error(rw, "failed to create browser", http.StatusInternalServerError)
+		writeBrowserError(rw, http.StatusInternalServerError, "failed to create browser", err.Error())
 		return
 	}
 
@@ -229,7 +214,7 @@ func (s *Service) CreateBrowser(rw http.ResponseWriter, req *http.Request) {
 	resp, err := httpClient.Do(innerReq)
 	if err != nil {
 		log.Error().Err(err).Msg("failed to post create session request")
-		http.Error(rw, "failed to create browser", http.StatusInternalServerError)
+		writeBrowserError(rw, http.StatusBadGateway, "failed to create browser", err.Error())
 		return
 	}
 	defer func() {
@@ -237,9 +222,38 @@ func (s *Service) CreateBrowser(rw http.ResponseWriter, req *http.Request) {
 		resp.Body.Close()
 	}()
 
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxHubResponseBody))
+	if err != nil {
+		log.Error().Err(err).Msg("failed to read create session response")
+		writeBrowserError(rw, http.StatusBadGateway, "failed to create browser", err.Error())
+		return
+	}
+
 	if resp.StatusCode != http.StatusOK {
-		log.Error().Str("status", resp.Status).Msg("create session request failed")
-		http.Error(rw, "failed to create browser", http.StatusInternalServerError)
+		reason := hubError(body, resp.Status)
+		log.Error().Str("status", resp.Status).Str("reason", reason).Msg("create session request failed")
+		writeBrowserError(rw, upstreamStatus(resp.StatusCode), "failed to create browser", reason)
+		return
+	}
+
+	var payload selenium.Payload
+	if err := json.Unmarshal(body, &payload); err != nil {
+		log.Error().Err(err).Msg("failed to decode create session response")
+		writeBrowserError(rw, http.StatusBadGateway, "failed to create browser", hubError(body, resp.Status))
+		return
+	}
+
+	sessionId, ok := payload.GetSessionId()
+	if !ok {
+		log.Error().Msg("create session response carries no session id")
+		writeBrowserError(rw, http.StatusBadGateway, "failed to create browser", "hub response carries no session id")
+		return
+	}
+
+	session, err := waitForSessionId(ctx, sessionId, s.sessionStore)
+	if err != nil {
+		log.Error().Err(err).Str("browserName", request.BrowserName).Msg("session did not become available in time")
+		writeBrowserError(rw, http.StatusGatewayTimeout, "session did not become available in time", err.Error())
 		return
 	}
 
@@ -250,7 +264,7 @@ func (s *Service) CreateBrowser(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	log.Info().Str("browserName", request.BrowserName).Str("browserVersion", request.BrowserVersion).Msg("browser created")
+	log.Info().Str("browserId", session.BrowserId).Str("browserName", request.BrowserName).Str("browserVersion", request.BrowserVersion).Msg("browser created")
 
 }
 
@@ -273,13 +287,11 @@ func (s *Service) DeleteBrowser(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	reqUrl := &url.URL{
-		Scheme: "http",
-		Host:   net.JoinHostPort(session.BrowserIP, "4445"),
-		Path:   fmt.Sprintf("/session/%s", session.SessionId),
-	}
+	log = log.With().Str("browserId", browserId).Str("browserName", session.BrowserName).Str("browserVersion", session.BrowserVersion).Logger()
 
-	innerReq, err := http.NewRequestWithContext(req.Context(), http.MethodDelete, reqUrl.String(), nil)
+	target := fmt.Sprintf("%s%s/%s", s.selenosisURL, wdHubSessionPath, session.SessionId)
+
+	innerReq, err := http.NewRequestWithContext(req.Context(), http.MethodDelete, target, nil)
 	if err != nil {
 		log.Error().Err(err).Msg("failed to build delete session request")
 		http.Error(rw, "failed to delete browser", http.StatusInternalServerError)
@@ -288,8 +300,8 @@ func (s *Service) DeleteBrowser(rw http.ResponseWriter, req *http.Request) {
 
 	resp, err := httpClient.Do(innerReq)
 	if err != nil {
-		log.Error().Err(err).Msg("failed to post create session request")
-		http.Error(rw, "failed to create browser", http.StatusInternalServerError)
+		log.Error().Err(err).Msg("failed to send delete session request")
+		http.Error(rw, "failed to delete browser", http.StatusInternalServerError)
 		return
 	}
 	defer func() {
@@ -304,6 +316,7 @@ func (s *Service) DeleteBrowser(rw http.ResponseWriter, req *http.Request) {
 	}
 
 	rw.WriteHeader(http.StatusOK)
+	log.Info().Msg("browser deleted")
 }
 
 func (s *Service) RouteVNC(rw http.ResponseWriter, req *http.Request) {
@@ -318,18 +331,23 @@ func (s *Service) RouteVNC(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	targetURL := url.URL{
+		Scheme: "ws",
+		Host:   net.JoinHostPort(session.BrowserIP, "4445"),
+		Path:   fmt.Sprintf("/selenosis/v1/vnc/%s", session.SessionId),
+	}
+
+	if !websocket.IsWebSocketUpgrade(req) {
+		probeVNC(rw, req, browserId, targetURL.String())
+		return
+	}
+
 	client, err := wsUpgrade(rw, req)
 	if err != nil {
 		log.Err(err).Str("browserId", browserId).Msg("client ws upgrade failed")
 		return
 	}
 	defer client.Close()
-
-	targetURL := url.URL{
-		Scheme: "ws",
-		Host:   net.JoinHostPort(session.BrowserIP, "4445"),
-		Path:   fmt.Sprintf("/selenosis/v1/vnc/%s", session.SessionId),
-	}
 
 	backend, err := wsDial(targetURL.String())
 	if err != nil {
@@ -397,6 +415,39 @@ func (s *Service) RouteVNC(rw http.ResponseWriter, req *http.Request) {
 	}
 }
 
+func probeVNC(rw http.ResponseWriter, req *http.Request, browserId, target string) {
+	log := logctx.FromContext(req.Context())
+
+	backend, err := wsDial(target)
+	if err != nil {
+		log.Warn().Err(err).Str("browserId", browserId).Msg("vnc probe dial failed")
+		http.Error(rw, "vnc is not available", http.StatusServiceUnavailable)
+		return
+	}
+	defer backend.Close()
+
+	greeting := make(chan error, 1)
+	go func() {
+		_, _, err := backend.ReadMessage()
+		greeting <- err
+	}()
+
+	select {
+	case err := <-greeting:
+		if err != nil {
+			log.Warn().Err(err).Str("browserId", browserId).Msg("vnc server did not greet")
+			http.Error(rw, "vnc is not available", http.StatusServiceUnavailable)
+			return
+		}
+	case <-time.After(vncProbeTimeout):
+		log.Warn().Str("browserId", browserId).Msg("vnc probe timed out")
+		http.Error(rw, "vnc is not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	rw.WriteHeader(http.StatusNoContent)
+}
+
 func isNormalWSDisconnect(err error) bool {
 	if err == nil {
 		return false
@@ -418,36 +469,77 @@ func isNormalWSDisconnect(err error) bool {
 	return false
 }
 
-func setSelenosisOptions(ann map[string]string, opts map[string]any) (map[string]string, error) {
-	if len(opts) == 0 {
-		return ann, nil
+func hubError(body []byte, status string) string {
+	var payload struct {
+		Value struct {
+			Message string `json:"message"`
+		} `json:"value"`
+	}
+	if err := json.Unmarshal(body, &payload); err == nil && payload.Value.Message != "" {
+		return truncateReason(payload.Value.Message)
 	}
 
-	b, err := json.Marshal(opts)
-	if err != nil {
-		return ann, fmt.Errorf("marshal selenosis options: %w", err)
+	if reason := strings.TrimSpace(string(body)); reason != "" {
+		return truncateReason(reason)
 	}
 
-	if ann == nil {
-		ann = map[string]string{}
-	}
-
-	ann[browserv1.SelenosisOptionsAnnotationKey] = string(b)
-	return ann, nil
+	return status
 }
 
-func waitForSession(ctx context.Context, browserName string, store store.Store[*types.Session]) (*types.Session, error) {
+func truncateReason(reason string) string {
+	if len(reason) <= maxHubErrorReason {
+		return reason
+	}
+
+	cut := reason[:maxHubErrorReason]
+	for len(cut) > 0 && !utf8.ValidString(cut) {
+		cut = cut[:len(cut)-1]
+	}
+
+	return cut
+}
+
+func writeBrowserError(rw http.ResponseWriter, status int, message, reason string) {
+	rw.Header().Set("Content-Type", "application/json")
+	rw.WriteHeader(status)
+
+	payload := struct {
+		Error  string `json:"error"`
+		Reason string `json:"reason,omitempty"`
+	}{Error: message, Reason: reason}
+
+	json.NewEncoder(rw).Encode(&payload) //nolint:errcheck
+}
+
+func upstreamStatus(status int) int {
+	if status >= http.StatusBadRequest && status <= 599 {
+		return status
+	}
+	return http.StatusBadGateway
+}
+
+func waitForSessionId(ctx context.Context, sessionId string, store store.Store[*types.Session]) (*types.Session, error) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
 	for {
+		if session, ok := findSessionId(sessionId, store); ok {
+			return session, nil
+		}
+
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("timeout waiting for session: %s", browserName)
+			return nil, fmt.Errorf("timeout waiting for session: %s", sessionId)
 		case <-ticker.C:
-			if session, ok := store.Get(browserName); ok {
-				return session, nil
-			}
 		}
 	}
+}
+
+func findSessionId(sessionId string, store store.Store[*types.Session]) (*types.Session, bool) {
+	for _, session := range store.List() {
+		if session.SessionId == sessionId {
+			return session, true
+		}
+	}
+	return nil, false
 }

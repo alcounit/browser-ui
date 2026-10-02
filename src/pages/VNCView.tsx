@@ -83,10 +83,7 @@ export const VNCView: React.FC = () => {
     const host = window.location.host;
     const url = `${protocol}://${host}/api/v1/browsers/${id}/vnc`;
 
-    const rfb: AnyRFB = new (RFB as any)(containerRef.current, url, {
-      scaleViewport: true,
-      resizeSession: false,
-    });
+    const rfb: AnyRFB = new (RFB as any)(containerRef.current, url);
 
     rfb.addEventListener("credentialsrequired", () => {
       const pw = pendingPwRef.current;
@@ -98,9 +95,11 @@ export const VNCView: React.FC = () => {
     });
 
     rfb.viewOnly = false;
-    rfb.localCursor = true;
+    rfb.showDotCursor = true;
     rfb.clipViewport = false;
     rfb.viewportDrag = false;
+    rfb.resizeSession = false;
+    rfb.scaleViewport = true;
 
     rfb.addEventListener("connect", () => {
       setStatus("Connected");
@@ -166,13 +165,15 @@ export const VNCView: React.FC = () => {
     let cancelled = false;
 
     const start = async () => {
+      let vncDeclared = true;
       try {
         const resp = await fetch(`/api/v1/browsers/${id}`);
         if (resp.ok) {
-          const session: { browserId: string; browserName?: string; browserVersion?: string; startTime?: string } = await resp.json();
+          const session: { browserId: string; browserName?: string; browserVersion?: string; startTime?: string; vnc?: boolean } = await resp.json();
           if (session.browserId === id) {
             browserNameRef.current = session.browserName ?? "";
             browserVersionRef.current = session.browserVersion ?? "";
+            vncDeclared = session.vnc !== false;
             if (!sessionStartTime && session.startTime) {
               setSessionStartTime(session.startTime);
             }
@@ -181,6 +182,25 @@ export const VNCView: React.FC = () => {
       } catch {}
 
       if (cancelled) return;
+
+      if (!vncDeclared) {
+        setStatus("Disconnected");
+        setNotice("VNC is not available for this browser");
+        return;
+      }
+
+      let probeStatus = 0;
+      try {
+        probeStatus = (await fetch(`/api/v1/browsers/${id}/vnc`)).status;
+      } catch {}
+
+      if (cancelled) return;
+
+      if (probeStatus === 503) {
+        setStatus("Disconnected");
+        setNotice("VNC server is not reachable in this session");
+        return;
+      }
 
       ladderRef.current = buildLadder(
         getSavedByVersion(browserNameRef.current, browserVersionRef.current),

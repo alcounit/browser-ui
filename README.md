@@ -56,6 +56,93 @@ Both scopes persist in `localStorage` (the session id is random and dies with th
 
 Wrong passwords surface a clear `securityfailure` message and re-prompt; a hard attempt cap prevents retry loops. This keeps a single deployment usable across mixed browser vendors without forcing one shared VNC password.
 
+Before connecting, the viewer checks that the session has a VNC server at all (see [Configuring browsers for the UI](#configuring-browsers-for-the-ui)). If it has none, the viewer says so and never asks for a password.
+
+---
+
+## Configuring browsers for the UI
+
+browser-ui reads two annotations to decide how a browser is shown. Both are plain annotations — no CRD change is involved.
+
+### `selenosis.io/session.type`
+
+What kind of session the image serves: `selenium`, `playwright`, `devtools` or `mcp`.
+
+| Where | Who sets it | Effect in the UI |
+| --- | --- | --- |
+| BrowserConfig — `spec.template.annotations` or a per-version entry (per-version wins) | operator | Decides whether the browser is offered in the **create-browser menus**. |
+| Browser CR | selenosis, when it creates a browser for a Selenium / Playwright / DevTools / MCP request | Label on the **session card** and the session-type filter. |
+
+- **Card label** — one of `selenium`, `playwright`, `devtools`, `mcp`, or `unknown` when the annotation is missing or holds any other value. Clicking a label filters the session list by it.
+- **Create-browser menus** (Dashboard *START BROWSER* and the *Start Browser* page) list **only `selenium` browsers**. A browser whose config has no `session.type`, or a type other than `selenium`, is not offered there.
+
+> Every Selenium BrowserConfig must set `selenosis.io/session.type: "selenium"`, otherwise its browsers disappear from the create-browser menus.
+
+### `selenosis.io/session.vnc`
+
+Whether the session has a VNC server. **VNC is available only when the value is `"true"`**; `"false"`, any other value, or no annotation at all means no VNC.
+
+> Every BrowserConfig whose image runs a VNC server must set `selenosis.io/session.vnc: "true"`, otherwise CONNECT stays disabled for its sessions.
+
+| Where | How |
+| --- | --- |
+| BrowserConfig | `spec.template.annotations` or a per-version entry (per-version wins). If several configs describe the same browser name and version, an explicit `"false"` in any of them wins over `"true"`; configs without the annotation do not count. |
+| Per session | selenosis option `annotations.selenosis.io/session.vnc` — as a query parameter (Playwright / DevTools / MCP) or in `selenosis:options` (Selenium). selenosis copies `annotations.*` onto the Browser CR. |
+
+**The per-session value wins over the config in both directions**, so a single session can turn VNC on or off regardless of its BrowserConfig.
+
+When VNC is off, the session card shows a disabled **CONNECT** with the hint *VNC is not available for this browser*, and opening the viewer directly shows the same message instead of a password prompt.
+
+When VNC is declared but the server is not actually there (misconfigured image, crashed server), the viewer probes the session first — `GET /api/v1/browsers/{id}/vnc` without a WebSocket upgrade — and shows *VNC server is not reachable in this session* on `503`.
+
+### Example
+
+```yaml
+apiVersion: browserconfig.selenosis.io/v1
+kind: BrowserConfig
+metadata:
+  name: chrome
+spec:
+  template:
+    annotations:
+      selenosis.io/session.type: "selenium"
+      selenosis.io/session.vnc: "true"
+  browsers:
+    chrome:
+      "131.0":
+        image: quay.io/browser/google-chrome-stable:131.0
+```
+
+A CDP-only image needs no VNC annotation at all — it is off by default:
+
+```yaml
+apiVersion: browserconfig.selenosis.io/v1
+kind: BrowserConfig
+metadata:
+  name: devtools
+spec:
+  template:
+    annotations:
+      selenosis.io/session.type: "devtools"
+  browsers:
+    devtools-chrome:
+      "151.0":
+        image: chromedp/headless-shell:151.0.7922.109
+```
+
+Turning VNC on for one DevTools session whose config turns it off:
+
+```
+ws://selenosis:4444/devtools/devtools-chrome/151.0?annotations.selenosis.io/session.vnc=true
+```
+
+Turning VNC off for one Selenium session:
+
+```json
+{"capabilities": {"alwaysMatch": {"browserName": "chrome",
+  "selenosis:options": {"annotations": {"selenosis.io/session.vnc": "false"}}}}}
+```
+
 ---
 
 ## Configuration
@@ -93,7 +180,7 @@ Basic Auth is optional. When `BASIC_AUTH_FILE` is set, the UI gates the API behi
 - `POST /browsers/` → create/start a session — body `{"browserName":"chrome","browserVersion":"146.0","selenosisOptions":{}}`
 - `GET /browsers/{browserId}/` → single session
 - `DELETE /browsers/{browserId}/` → delete a manually started session
-- `GET /browsers/{browserId}/vnc` → VNC WebSocket proxy to the pod
+- `GET /browsers/{browserId}/vnc` → VNC WebSocket proxy to the pod; a plain `GET` without upgrade is a VNC probe (`204` / `503`)
 
 **Health**
 - `GET /health` → `{"status":"ok"}`

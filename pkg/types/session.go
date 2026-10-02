@@ -12,7 +12,10 @@ type Session struct {
 	BrowserName     string          `json:"browserName"`
 	BrowserVersion  string          `json:"browserVersion"`
 	Owner           string          `json:"owner,omitempty"`
+	SessionType     string          `json:"sessionType,omitempty"`
 	StartedManually bool            `json:"startedManually"`
+	VNC             bool            `json:"vnc"`
+	VNCOverride     *bool           `json:"-"`
 	StartTime       *metav1.Time    `json:"startTime"`
 	Phase           corev1.PodPhase `json:"phase"`
 }

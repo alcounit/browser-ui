@@ -75,6 +75,7 @@ func main() {
 	apiURL := env.GetEnvOrDefault("BROWSER_SERVICE_URL", "http://browser-service:8080")
 	browserStartTimeout := env.GetEnvDurationOrDefault("BROWSER_STARTUP_TIMEOUT", 3*time.Minute)
 	namespace := env.GetEnvOrDefault("BROWSER_NAMESPACE", "default")
+	selenosisURL := env.GetEnvOrDefault("SELENOSIS_URL", "http://selenosis:4444")
 	staticPath := env.GetEnvOrDefault("UI_STATIC_PATH", "/app/static")
 
 	var authStore *auth.AuthStore
@@ -122,7 +123,7 @@ func main() {
 	}()
 	log.Info().Msgf("event collector started, connected to %s", apiURL)
 
-	svc := service.NewService(browserClient, namespace, sessionStore, browserStore, browserStartTimeout)
+	svc := service.NewService(selenosisURL, sessionStore, browserStore, browserStartTimeout)
 
 	router := chi.NewRouter()
 	router.Use(middleware.Recoverer)

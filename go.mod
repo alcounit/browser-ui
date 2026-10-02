@@ -3,13 +3,12 @@ module github.com/alcounit/browser-ui
 go 1.25.0
 
 require (
-	github.com/alcounit/browser-controller v1.0.0
+	github.com/alcounit/browser-controller v1.0.1
 	github.com/alcounit/browser-service v0.0.9
-	github.com/alcounit/seleniferous/v2 v2.0.9
-	github.com/alcounit/selenosis/v2 v2.1.0
+	github.com/alcounit/seleniferous/v2 v2.1.3
+	github.com/alcounit/selenosis/v2 v2.1.2
 	github.com/go-chi/chi v1.5.5
 	github.com/go-chi/chi/v5 v5.2.3
-	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/rs/zerolog v1.34.0
 	k8s.io/api v0.35.0
@@ -21,6 +20,7 @@ require (
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
+	github.com/google/uuid v1.6.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.19 // indirect

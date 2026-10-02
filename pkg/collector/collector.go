@@ -27,10 +27,19 @@ type Collector struct {
 	sessionStore  store.Store[*types.Session]
 	configStore   store.Store[types.BrowserVersions]
 	broadcaster   broadcast.Broadcaster[event.BrowserEvent]
+	vnc           map[string]map[string]bool
 }
 
 func NewCollector(browserClient browserclient.Client, configClient browserconfigclient.Client, namespace string, sessionStore store.Store[*types.Session], configStore store.Store[types.BrowserVersions], broadcaster broadcast.Broadcaster[event.BrowserEvent]) *Collector {
-	return &Collector{browserClient, configClient, namespace, sessionStore, configStore, broadcaster}
+	return &Collector{
+		browserClient: browserClient,
+		configClient:  configClient,
+		namespace:     namespace,
+		sessionStore:  sessionStore,
+		configStore:   configStore,
+		broadcaster:   broadcaster,
+		vnc:           make(map[string]map[string]bool),
+	}
 }
 
 func (c *Collector) Run(ctx context.Context) error {
@@ -122,6 +131,8 @@ func (c *Collector) Run(ctx context.Context) error {
 			switch configEvent.EventType {
 			case event.EventTypeDeleted:
 				c.configStore.Delete(cfg.Name)
+				delete(c.vnc, cfg.Name)
+				c.refreshSessionsVNC()
 				log.Info().Str("eventType", "deleted").Str("configName", cfg.Name).Msg("delete browser config from store")
 			case event.EventTypeAdded, event.EventTypeModified:
 
@@ -153,20 +164,117 @@ func parseIp(ip string) (string, error) {
 
 }
 
+func resolveAnnotation(cfg *browserconfigv1.BrowserConfig, spec *browserconfigv1.BrowserVersionConfigSpec, key string) (string, bool) {
+	if spec != nil && spec.Annotations != nil {
+		if value, ok := (*spec.Annotations)[key]; ok {
+			return value, true
+		}
+	}
+
+	if cfg.Spec.Template != nil && cfg.Spec.Template.Annotations != nil {
+		if value, ok := (*cfg.Spec.Template.Annotations)[key]; ok {
+			return value, true
+		}
+	}
+
+	return "", false
+}
+
+func resolveSessionType(cfg *browserconfigv1.BrowserConfig, spec *browserconfigv1.BrowserVersionConfigSpec) string {
+	if sessionType, ok := resolveAnnotation(cfg, spec, browserv1.SelenosisSessionTypeAnnotationKey); ok {
+		return types.NormalizeSessionType(sessionType)
+	}
+
+	return types.SessionTypeUnknown
+}
+
+func resolveVNC(cfg *browserconfigv1.BrowserConfig, spec *browserconfigv1.BrowserVersionConfigSpec) (bool, bool) {
+	value, ok := resolveAnnotation(cfg, spec, types.VNCAnnotationKey)
+	return value == "true", ok
+}
+
+func vncKey(browserName, browserVersion string) string {
+	return browserName + ":" + browserVersion
+}
+
+func (c *Collector) vncAvailable(browserName, browserVersion string) bool {
+	key := vncKey(browserName, browserVersion)
+	declared := false
+	for _, entries := range c.vnc {
+		available, ok := entries[key]
+		if !ok {
+			continue
+		}
+		if !available {
+			return false
+		}
+		declared = true
+	}
+	return declared
+}
+
+func (c *Collector) refreshSessionsVNC() {
+	for _, sess := range c.sessionStore.List() {
+		if sess.VNCOverride != nil {
+			continue
+		}
+
+		available := c.vncAvailable(sess.BrowserName, sess.BrowserVersion)
+		if sess.VNC == available {
+			continue
+		}
+
+		updated := *sess
+		updated.VNC = available
+		c.sessionStore.Set(sess.BrowserId, &updated)
+	}
+}
+
 func storeBrowserConfig(configName string, cfg *browserconfigv1.BrowserConfig, c *Collector) {
 	result := make(types.BrowserVersions, len(cfg.Spec.Browsers))
+	vnc := make(map[string]bool)
 	for browserName, versions := range cfg.Spec.Browsers {
-		vs := make([]string, 0, len(versions))
-		for v := range versions {
-			vs = append(vs, v)
+		for version, spec := range versions {
+			sessionType := resolveSessionType(cfg, spec)
+			if available, declared := resolveVNC(cfg, spec); declared {
+				vnc[vncKey(browserName, version)] = available
+			}
+
+			group, ok := result[sessionType]
+			if !ok {
+				group = make(types.BrowserGroup, len(cfg.Spec.Browsers))
+				result[sessionType] = group
+			}
+
+			if _, ok := group[browserName]; !ok {
+				group[browserName] = make([]string, 0, len(versions))
+			}
+			group[browserName] = append(group[browserName], version)
 		}
-		result[browserName] = vs
 	}
 
 	c.configStore.Set(configName, result)
+	c.vnc[configName] = vnc
+	c.refreshSessionsVNC()
+}
+
+func sessionVNCOverride(browser *browserv1.Browser) *bool {
+	value, ok := browser.Annotations[types.VNCAnnotationKey]
+	if !ok {
+		return nil
+	}
+
+	available := value == "true"
+	return &available
 }
 
 func storeSession(sessionId string, browser *browserv1.Browser, c *Collector) {
+	override := sessionVNCOverride(browser)
+	available := c.vncAvailable(browser.Spec.BrowserName, browser.Spec.BrowserVersion)
+	if override != nil {
+		available = *override
+	}
+
 	sess := &types.Session{
 		SessionId:       sessionId,
 		BrowserId:       browser.Name,
@@ -174,7 +282,10 @@ func storeSession(sessionId string, browser *browserv1.Browser, c *Collector) {
 		BrowserName:     browser.Spec.BrowserName,
 		BrowserVersion:  browser.Spec.BrowserVersion,
 		Owner:           browser.Labels[browserv1.SelenosisOwnerLabelKey],
+		SessionType:     browser.Annotations[browserv1.SelenosisSessionTypeAnnotationKey],
 		StartedManually: browser.Annotations["startedManually"] == "true",
+		VNC:             available,
+		VNCOverride:     override,
 		StartTime:       browser.CreationTimestamp.DeepCopy(),
 		Phase:           corev1.PodPhase(browser.Status.Phase),
 	}
