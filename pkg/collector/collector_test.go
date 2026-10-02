@@ -376,7 +376,11 @@ func TestCollectorRunListConfigsPopulatesStore(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected cfg-1 to be in config store")
 	}
-	versions, ok := bv["chrome"]
+	group, ok := bv[types.SessionTypeUnknown]
+	if !ok {
+		t.Fatalf("expected default session type group in browser versions")
+	}
+	versions, ok := group["chrome"]
 	if !ok {
 		t.Fatalf("expected chrome in browser versions")
 	}
@@ -459,7 +463,7 @@ func TestCollectorRunConfigEventAdded(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected cfg-added to be in config store")
 	}
-	if _, ok := bv["firefox"]; !ok {
+	if _, ok := bv[types.SessionTypeUnknown]["firefox"]; !ok {
 		t.Fatalf("expected firefox in browser versions")
 	}
 }
@@ -475,7 +479,7 @@ func TestCollectorRunConfigEventModified(t *testing.T) {
 	}
 
 	cfgStore := store.NewDefaultStore[types.BrowserVersions]()
-	cfgStore.Set("cfg-modified", types.BrowserVersions{"old-browser": {"1.0"}})
+	cfgStore.Set("cfg-modified", types.BrowserVersions{types.SessionTypeUnknown: {"old-browser": {"1.0"}}})
 
 	cl := &fakeClient{stream: browserStream}
 	cfgClient := &fakeConfigClient{stream: configStream}
@@ -494,10 +498,10 @@ func TestCollectorRunConfigEventModified(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected cfg-modified to be in config store")
 	}
-	if _, ok := bv["new-browser"]; !ok {
+	if _, ok := bv[types.SessionTypeUnknown]["new-browser"]; !ok {
 		t.Fatalf("expected new-browser in browser versions after modify")
 	}
-	if _, ok := bv["old-browser"]; ok {
+	if _, ok := bv[types.SessionTypeUnknown]["old-browser"]; ok {
 		t.Fatalf("expected old-browser to be replaced after modify")
 	}
 }
@@ -513,7 +517,7 @@ func TestCollectorRunConfigEventDeleted(t *testing.T) {
 	}
 
 	cfgStore := store.NewDefaultStore[types.BrowserVersions]()
-	cfgStore.Set("cfg-del", types.BrowserVersions{"chrome": {"123"}})
+	cfgStore.Set("cfg-del", types.BrowserVersions{types.SessionTypeUnknown: {"chrome": {"123"}}})
 
 	cl := &fakeClient{stream: browserStream}
 	cfgClient := &fakeConfigClient{stream: configStream}
@@ -648,5 +652,478 @@ func TestCollectorRunConfigEventsStreamError(t *testing.T) {
 	err := col.Run(context.Background())
 	if err == nil || err.Error() != "config events error" {
 		t.Fatalf("expected config events error, got %v", err)
+	}
+}
+
+func TestStoreSessionSetsSessionTypeFromAnnotation(t *testing.T) {
+	tests := []struct {
+		name        string
+		labels      map[string]string
+		annotations map[string]string
+		want        string
+	}{
+		{
+			name:        "selenium",
+			annotations: map[string]string{browserv1.SelenosisSessionTypeAnnotationKey: "selenium"},
+			want:        "selenium",
+		},
+		{
+			name:        "playwright",
+			annotations: map[string]string{browserv1.SelenosisSessionTypeAnnotationKey: "playwright"},
+			want:        "playwright",
+		},
+		{
+			name:        "no session type annotation",
+			annotations: map[string]string{"startedManually": "true"},
+			want:        "",
+		},
+		{
+			name:   "legacy label is ignored",
+			labels: map[string]string{browserv1.SelenosisSessionTypeAnnotationKey: "selenium"},
+			want:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stream := &fakeStream{
+				eventsCh: make(chan *event.BrowserEvent, 1),
+				errorsCh: make(chan error, 1),
+			}
+			client := &fakeClient{stream: stream}
+			st := store.NewDefaultStore[*types.Session]()
+			col := NewCollector(client, &fakeConfigClient{}, "default", st, store.NewDefaultStore[types.BrowserVersions](), nil)
+
+			now := metav1.NewTime(time.Unix(0, 0).UTC())
+			stream.eventsCh <- &event.BrowserEvent{
+				EventType: event.EventTypeAdded,
+				Browser: &browserv1.Browser{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:              "browser-typed",
+						CreationTimestamp: now,
+						Labels:            tt.labels,
+						Annotations:       tt.annotations,
+					},
+					Spec:   browserv1.BrowserSpec{BrowserName: "chrome", BrowserVersion: "123"},
+					Status: browserv1.BrowserStatus{PodIP: "127.0.0.1", Phase: corev1.PodRunning},
+				},
+			}
+			close(stream.eventsCh)
+
+			col.Run(context.Background()) //nolint:errcheck
+
+			sess, ok := st.Get("browser-typed")
+			if !ok {
+				t.Fatal("expected browser-typed to be stored")
+			}
+			if sess.SessionType != tt.want {
+				t.Fatalf("sessionType = %q, want %q", sess.SessionType, tt.want)
+			}
+		})
+	}
+}
+
+func annotations(kv map[string]string) *map[string]string {
+	return &kv
+}
+
+func TestStoreBrowserConfigSessionTypes(t *testing.T) {
+	sessionTypeKey := browserv1.SelenosisSessionTypeAnnotationKey
+
+	tests := []struct {
+		name string
+		cfg  *browserconfigv1.BrowserConfig
+		want types.BrowserVersions
+	}{
+		{
+			name: "no annotation anywhere falls back to default",
+			cfg: &browserconfigv1.BrowserConfig{
+				ObjectMeta: metav1.ObjectMeta{Name: "cfg"},
+				Spec: browserconfigv1.BrowserConfigSpec{
+					Browsers: map[string]map[string]*browserconfigv1.BrowserVersionConfigSpec{
+						"chrome": {"120": {Image: "chrome:120"}},
+					},
+				},
+			},
+			want: types.BrowserVersions{
+				types.SessionTypeUnknown: {"chrome": {"120"}},
+			},
+		},
+		{
+			name: "template annotation applies to every browser",
+			cfg: &browserconfigv1.BrowserConfig{
+				ObjectMeta: metav1.ObjectMeta{Name: "cfg"},
+				Spec: browserconfigv1.BrowserConfigSpec{
+					Template: &browserconfigv1.Template{
+						Annotations: annotations(map[string]string{sessionTypeKey: "playwright"}),
+					},
+					Browsers: map[string]map[string]*browserconfigv1.BrowserVersionConfigSpec{
+						"playwright-chromium": {"1.59.1": {Image: "pw:1.59.1"}},
+					},
+				},
+			},
+			want: types.BrowserVersions{
+				"playwright": {"playwright-chromium": {"1.59.1"}},
+			},
+		},
+		{
+			name: "per version annotation wins over template",
+			cfg: &browserconfigv1.BrowserConfig{
+				ObjectMeta: metav1.ObjectMeta{Name: "cfg"},
+				Spec: browserconfigv1.BrowserConfigSpec{
+					Template: &browserconfigv1.Template{
+						Annotations: annotations(map[string]string{sessionTypeKey: "selenium"}),
+					},
+					Browsers: map[string]map[string]*browserconfigv1.BrowserVersionConfigSpec{
+						"chrome": {"120": {Image: "chrome:120"}},
+						"playwright-mcp": {
+							"0.0.75": {
+								Image:       "mcp:0.0.75",
+								Annotations: annotations(map[string]string{sessionTypeKey: "mcp"}),
+							},
+						},
+					},
+				},
+			},
+			want: types.BrowserVersions{
+				"selenium": {"chrome": {"120"}},
+				"mcp":      {"playwright-mcp": {"0.0.75"}},
+			},
+		},
+		{
+			name: "unknown annotation value falls back to default",
+			cfg: &browserconfigv1.BrowserConfig{
+				ObjectMeta: metav1.ObjectMeta{Name: "cfg"},
+				Spec: browserconfigv1.BrowserConfigSpec{
+					Template: &browserconfigv1.Template{
+						Annotations: annotations(map[string]string{sessionTypeKey: "cdp"}),
+					},
+					Browsers: map[string]map[string]*browserconfigv1.BrowserVersionConfigSpec{
+						"chrome": {"120": {Image: "chrome:120"}},
+					},
+				},
+			},
+			want: types.BrowserVersions{
+				types.SessionTypeUnknown: {"chrome": {"120"}},
+			},
+		},
+		{
+			name: "template without the key falls back to default",
+			cfg: &browserconfigv1.BrowserConfig{
+				ObjectMeta: metav1.ObjectMeta{Name: "cfg"},
+				Spec: browserconfigv1.BrowserConfigSpec{
+					Template: &browserconfigv1.Template{
+						Annotations: annotations(map[string]string{"other": "value"}),
+					},
+					Browsers: map[string]map[string]*browserconfigv1.BrowserVersionConfigSpec{
+						"chrome": {"120": {Image: "chrome:120"}},
+					},
+				},
+			},
+			want: types.BrowserVersions{
+				types.SessionTypeUnknown: {"chrome": {"120"}},
+			},
+		},
+		{
+			name: "nil version spec falls back to template",
+			cfg: &browserconfigv1.BrowserConfig{
+				ObjectMeta: metav1.ObjectMeta{Name: "cfg"},
+				Spec: browserconfigv1.BrowserConfigSpec{
+					Template: &browserconfigv1.Template{
+						Annotations: annotations(map[string]string{sessionTypeKey: "selenium"}),
+					},
+					Browsers: map[string]map[string]*browserconfigv1.BrowserVersionConfigSpec{
+						"chrome": {"120": nil},
+					},
+				},
+			},
+			want: types.BrowserVersions{
+				"selenium": {"chrome": {"120"}},
+			},
+		},
+		{
+			name: "nil template annotations fall back to default",
+			cfg: &browserconfigv1.BrowserConfig{
+				ObjectMeta: metav1.ObjectMeta{Name: "cfg"},
+				Spec: browserconfigv1.BrowserConfigSpec{
+					Template: &browserconfigv1.Template{},
+					Browsers: map[string]map[string]*browserconfigv1.BrowserVersionConfigSpec{
+						"chrome": {"120": {Image: "chrome:120"}},
+					},
+				},
+			},
+			want: types.BrowserVersions{
+				types.SessionTypeUnknown: {"chrome": {"120"}},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfgStore := store.NewDefaultStore[types.BrowserVersions]()
+			col := NewCollector(nil, nil, "", store.NewDefaultStore[*types.Session](), cfgStore, nil)
+
+			storeBrowserConfig(tt.cfg.Name, tt.cfg, col)
+
+			got, ok := cfgStore.Get(tt.cfg.Name)
+			if !ok {
+				t.Fatalf("expected %q in config store", tt.cfg.Name)
+			}
+
+			if len(got) != len(tt.want) {
+				t.Fatalf("session type groups = %v, want %v", got, tt.want)
+			}
+
+			for sessionType, wantGroup := range tt.want {
+				gotGroup, ok := got[sessionType]
+				if !ok {
+					t.Fatalf("missing session type %q in %v", sessionType, got)
+				}
+				if len(gotGroup) != len(wantGroup) {
+					t.Fatalf("group %q = %v, want %v", sessionType, gotGroup, wantGroup)
+				}
+				for browserName, wantVersions := range wantGroup {
+					gotVersions, ok := gotGroup[browserName]
+					if !ok {
+						t.Fatalf("missing browser %q in group %q", browserName, sessionType)
+					}
+					if len(gotVersions) != len(wantVersions) {
+						t.Fatalf("versions for %q/%q = %v, want %v", sessionType, browserName, gotVersions, wantVersions)
+					}
+					for i := range wantVersions {
+						if gotVersions[i] != wantVersions[i] {
+							t.Fatalf("versions for %q/%q = %v, want %v", sessionType, browserName, gotVersions, wantVersions)
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestStoreBrowserConfigMultipleVersions(t *testing.T) {
+	cfg := &browserconfigv1.BrowserConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: "cfg"},
+		Spec: browserconfigv1.BrowserConfigSpec{
+			Browsers: map[string]map[string]*browserconfigv1.BrowserVersionConfigSpec{
+				"chrome": {
+					"120": {Image: "chrome:120"},
+					"121": {Image: "chrome:121"},
+				},
+			},
+		},
+	}
+
+	cfgStore := store.NewDefaultStore[types.BrowserVersions]()
+	col := NewCollector(nil, nil, "", store.NewDefaultStore[*types.Session](), cfgStore, nil)
+
+	storeBrowserConfig(cfg.Name, cfg, col)
+
+	got, ok := cfgStore.Get(cfg.Name)
+	if !ok {
+		t.Fatalf("expected cfg in config store")
+	}
+
+	versions := got[types.SessionTypeUnknown]["chrome"]
+	if len(versions) != 2 {
+		t.Fatalf("versions = %v, want 2 entries", versions)
+	}
+
+	seen := map[string]bool{}
+	for _, v := range versions {
+		seen[v] = true
+	}
+	if !seen["120"] || !seen["121"] {
+		t.Fatalf("versions = %v, want 120 and 121", versions)
+	}
+}
+
+func vncConfig(name string, template, perVersion map[string]string) *browserconfigv1.BrowserConfig {
+	cfg := &browserconfigv1.BrowserConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec: browserconfigv1.BrowserConfigSpec{
+			Browsers: map[string]map[string]*browserconfigv1.BrowserVersionConfigSpec{
+				"chrome": {"123": {Image: "chrome:123"}},
+			},
+		},
+	}
+	if template != nil {
+		cfg.Spec.Template = &browserconfigv1.Template{Annotations: annotations(template)}
+	}
+	if perVersion != nil {
+		cfg.Spec.Browsers["chrome"]["123"].Annotations = annotations(perVersion)
+	}
+	return cfg
+}
+
+func TestResolveVNC(t *testing.T) {
+	key := types.VNCAnnotationKey
+	tests := []struct {
+		name         string
+		template     map[string]string
+		perVersion   map[string]string
+		wantVNC      bool
+		wantDeclared bool
+	}{
+		{name: "absent", wantVNC: false, wantDeclared: false},
+		{name: "template true", template: map[string]string{key: "true"}, wantVNC: true, wantDeclared: true},
+		{name: "template false", template: map[string]string{key: "false"}, wantVNC: false, wantDeclared: true},
+		{name: "per version wins over template", template: map[string]string{key: "false"}, perVersion: map[string]string{key: "true"}, wantVNC: true, wantDeclared: true},
+		{name: "other value is not true", template: map[string]string{key: "yes"}, wantVNC: false, wantDeclared: true},
+		{name: "unrelated annotation", perVersion: map[string]string{"foo": "true"}, wantVNC: false, wantDeclared: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := vncConfig("cfg", tt.template, tt.perVersion)
+			gotVNC, gotDeclared := resolveVNC(cfg, cfg.Spec.Browsers["chrome"]["123"])
+			if gotVNC != tt.wantVNC || gotDeclared != tt.wantDeclared {
+				t.Fatalf("resolveVNC = (%v, %v), want (%v, %v)", gotVNC, gotDeclared, tt.wantVNC, tt.wantDeclared)
+			}
+		})
+	}
+}
+
+func TestStoreSessionResolvesVNC(t *testing.T) {
+	sessions := store.NewDefaultStore[*types.Session]()
+	col := NewCollector(nil, nil, "", sessions, store.NewDefaultStore[types.BrowserVersions](), nil)
+
+	browser := newBrowserEvent(event.EventTypeAdded, "b1", "127.0.0.1").Browser
+
+	storeSession("sid", browser, col)
+	if got, _ := sessions.Get("b1"); got.VNC {
+		t.Fatal("expected vnc to be off without any config")
+	}
+
+	storeBrowserConfig("cfg", vncConfig("cfg", nil, map[string]string{types.VNCAnnotationKey: "true"}), col)
+	storeSession("sid", browser, col)
+	if got, _ := sessions.Get("b1"); !got.VNC {
+		t.Fatal("expected vnc to be on once the config declares it")
+	}
+}
+
+func TestBrowserConfigChangesRefreshSessionVNC(t *testing.T) {
+	sessions := store.NewDefaultStore[*types.Session]()
+	col := NewCollector(nil, nil, "", sessions, store.NewDefaultStore[types.BrowserVersions](), nil)
+
+	storeSession("sid", newBrowserEvent(event.EventTypeAdded, "b1", "127.0.0.1").Browser, col)
+	before, _ := sessions.Get("b1")
+
+	storeBrowserConfig("cfg", vncConfig("cfg", map[string]string{types.VNCAnnotationKey: "true"}, nil), col)
+
+	after, _ := sessions.Get("b1")
+	if !after.VNC {
+		t.Fatal("expected the stored session to pick up vnc=true from a later config")
+	}
+	if before.VNC {
+		t.Fatal("expected the previously stored session object to stay untouched")
+	}
+
+	storeBrowserConfig("cfg", vncConfig("cfg", nil, nil), col)
+	if got, _ := sessions.Get("b1"); got.VNC {
+		t.Fatal("expected vnc to go off once the annotation is removed")
+	}
+}
+
+func TestVNCAvailabilityAcrossConfigs(t *testing.T) {
+	key := types.VNCAnnotationKey
+	col := NewCollector(nil, nil, "", store.NewDefaultStore[*types.Session](), store.NewDefaultStore[types.BrowserVersions](), nil)
+
+	storeBrowserConfig("silent", vncConfig("silent", nil, nil), col)
+	storeBrowserConfig("on", vncConfig("on", map[string]string{key: "true"}, nil), col)
+	if !col.vncAvailable("chrome", "123") {
+		t.Fatal("expected a config without the annotation not to veto an explicit true")
+	}
+
+	storeBrowserConfig("off", vncConfig("off", map[string]string{key: "false"}, nil), col)
+	if col.vncAvailable("chrome", "123") {
+		t.Fatal("expected an explicit false to win over an explicit true")
+	}
+
+	if col.vncAvailable("chrome", "999") {
+		t.Fatal("expected an undeclared version to default to off")
+	}
+}
+
+func TestCollectorRunConfigDeleteTurnsVNCOff(t *testing.T) {
+	browserStream := &fakeStream{
+		eventsCh: make(chan *event.BrowserEvent, 1),
+		errorsCh: make(chan error, 1),
+	}
+	configStream := &fakeConfigStream{
+		eventsCh: make(chan *event.BrowserConfigEvent, 2),
+		errorsCh: make(chan error, 1),
+	}
+
+	sessions := store.NewDefaultStore[*types.Session]()
+	col := NewCollector(&fakeClient{stream: browserStream}, &fakeConfigClient{stream: configStream}, "default", sessions, store.NewDefaultStore[types.BrowserVersions](), nil)
+
+	storeBrowserConfig("cfg", vncConfig("cfg", map[string]string{types.VNCAnnotationKey: "true"}, nil), col)
+	storeSession("sid", newBrowserEvent(event.EventTypeAdded, "b1", "127.0.0.1").Browser, col)
+
+	configStream.eventsCh <- newConfigEvent(event.EventTypeDeleted, "cfg", nil)
+	close(configStream.eventsCh)
+
+	col.Run(context.Background()) //nolint:errcheck
+
+	if got, _ := sessions.Get("b1"); got.VNC {
+		t.Fatal("expected vnc to go off after the declaring config is deleted")
+	}
+}
+
+func browserWithVNC(value string) *browserv1.Browser {
+	browser := newBrowserEvent(event.EventTypeAdded, "b1", "127.0.0.1").Browser
+	browser.Annotations = map[string]string{types.VNCAnnotationKey: value}
+	return browser
+}
+
+func TestSessionVNCOverrideWinsOverConfig(t *testing.T) {
+	key := types.VNCAnnotationKey
+	tests := []struct {
+		name       string
+		configVNC  map[string]string
+		sessionVNC string
+		want       bool
+	}{
+		{name: "session enables what config disables", configVNC: map[string]string{key: "false"}, sessionVNC: "true", want: true},
+		{name: "session enables without any config", sessionVNC: "true", want: true},
+		{name: "session disables what config enables", configVNC: map[string]string{key: "true"}, sessionVNC: "false", want: false},
+		{name: "session value other than true disables", configVNC: map[string]string{key: "true"}, sessionVNC: "yes", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sessions := store.NewDefaultStore[*types.Session]()
+			col := NewCollector(nil, nil, "", sessions, store.NewDefaultStore[types.BrowserVersions](), nil)
+
+			storeBrowserConfig("cfg", vncConfig("cfg", tt.configVNC, nil), col)
+			storeSession("sid", browserWithVNC(tt.sessionVNC), col)
+
+			got, _ := sessions.Get("b1")
+			if got.VNC != tt.want {
+				t.Fatalf("vnc = %v, want %v", got.VNC, tt.want)
+			}
+			if got.VNCOverride == nil || *got.VNCOverride != tt.want {
+				t.Fatalf("expected the session override to be recorded as %v", tt.want)
+			}
+		})
+	}
+}
+
+func TestSessionVNCOverrideSurvivesConfigChanges(t *testing.T) {
+	sessions := store.NewDefaultStore[*types.Session]()
+	col := NewCollector(nil, nil, "", sessions, store.NewDefaultStore[types.BrowserVersions](), nil)
+
+	storeSession("sid", browserWithVNC("true"), col)
+
+	storeBrowserConfig("cfg", vncConfig("cfg", map[string]string{types.VNCAnnotationKey: "false"}, nil), col)
+	if got, _ := sessions.Get("b1"); !got.VNC {
+		t.Fatal("expected the session override to survive a config that disables vnc")
+	}
+
+	delete(col.vnc, "cfg")
+	col.refreshSessionsVNC()
+	if got, _ := sessions.Get("b1"); !got.VNC {
+		t.Fatal("expected the session override to survive a config delete")
 	}
 }

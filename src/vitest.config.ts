@@ -14,7 +14,7 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "text-summary"],
-      include: ["lib/**/*.ts", "components/**/*.tsx", "pages/VNCView.tsx"],
+      include: ["lib/**/*.ts", "components/**/*.tsx", "pages/VNCView.tsx", "pages/StartBrowser.tsx", "pages/Dashboard.tsx"],
       exclude: ["**/*.test.ts", "**/*.test.tsx"],
     },
   },

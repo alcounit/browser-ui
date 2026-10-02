@@ -7,8 +7,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test": "NODE_OPTIONS=--no-experimental-webstorage vitest run",
+    "test:coverage": "NODE_OPTIONS=--no-experimental-webstorage vitest run --coverage"
   },
   "dependencies": {
     "@novnc/novnc": "1.6.0",

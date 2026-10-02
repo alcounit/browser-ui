@@ -3,6 +3,11 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { formatUptime, getBrowserIcon } from '../utils';
 import { useAuth } from '../App';
+import { SessionTypeBadge } from '../components/SessionTypeBadge';
+import { ToastHost, useToasts } from '../components/Toast';
+import { readTypeFilter, writeTypeFilter } from '../lib/sessionFilter';
+import { buildCatalog, creatableGroups, flattenBrowsers, startBrowserError, type SessionGroup, type SupportedBrowsers } from '../lib/browserCatalog';
+import { sessionTypeLabel } from '../lib/sessionType';
 
 const buildNumber = __BUILD_NUMBER__;
 
@@ -14,16 +19,13 @@ interface Session {
   startTime: string;
   phase: 'Running' | 'Pending' | 'Failed' | 'Succeeded';
   startedManually: boolean;
+  sessionType?: string;
+  vnc?: boolean;
 }
 
 interface StatusResponse {
   activeSessions: Session[];
-  supportedBrowsers: Record<string, string[]>[];
-}
-
-interface BrowserGroup {
-  name: string;
-  versions: string[];
+  supportedBrowsers: SupportedBrowsers[];
 }
 
 const fetchStatus = async (onUnauthorized: () => void): Promise<StatusResponse> => {
@@ -39,7 +41,7 @@ const startBrowser = async (payload: { browserName: string; browserVersion: stri
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error('Failed to start browser');
+  if (!res.ok) throw await startBrowserError(res);
   return res.json();
 };
 
@@ -144,10 +146,13 @@ export const Dashboard: React.FC = () => {
 
   const [, setNow] = React.useState(Date.now());
   const [dropdownOpen, setDropdownOpen] = React.useState(false);
+  const [expandedGroup, setExpandedGroup] = React.useState<string | null>(null);
   const [expandedBrowser, setExpandedBrowser] = React.useState<string | null>(null);
   const [startingKey, setStartingKey] = React.useState<string | null>(null);
   const [deletingIds, setDeletingIds] = React.useState<Set<string>>(new Set());
   const wrapperRef = React.useRef<HTMLDivElement>(null);
+  const { toasts, push, dismiss } = useToasts();
+  const [typeFilter, setTypeFilter] = React.useState<string | null>(() => readTypeFilter());
 
   React.useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
@@ -160,6 +165,7 @@ export const Dashboard: React.FC = () => {
     const handler = (e: MouseEvent) => {
       if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
         setDropdownOpen(false);
+        setExpandedGroup(null);
         setExpandedBrowser(null);
       }
     };
@@ -167,19 +173,14 @@ export const Dashboard: React.FC = () => {
     return () => document.removeEventListener('mousedown', handler);
   }, [dropdownOpen]);
 
-  const browserGroups: BrowserGroup[] = React.useMemo(() => {
-    const map = new Map<string, Set<string>>();
-    (data?.supportedBrowsers ?? []).forEach(cfg => {
-      Object.entries(cfg).forEach(([name, versions]) => {
-        if (!map.has(name)) map.set(name, new Set());
-        versions.forEach(v => map.get(name)!.add(v));
-      });
-    });
-    return [...map.entries()].map(([name, vSet]) => ({
-      name,
-      versions: [...vSet].sort((a, b) => b.localeCompare(a, undefined, { numeric: true })),
-    })).sort((a, b) => a.name.localeCompare(b.name));
-  }, [data]);
+  const sessionGroups: SessionGroup[] = React.useMemo(
+    () => buildCatalog(data?.supportedBrowsers ?? []),
+    [data],
+  );
+
+  const browserGroups = React.useMemo(() => flattenBrowsers(sessionGroups), [sessionGroups]);
+
+  const startGroups = React.useMemo(() => creatableGroups(sessionGroups), [sessionGroups]);
 
   const deleteMutation = useMutation({
     mutationFn: async (browserId: string) => {
@@ -196,34 +197,61 @@ export const Dashboard: React.FC = () => {
     onSuccess: (session) => {
       setStartingKey(null);
       setDropdownOpen(false);
+      setExpandedGroup(null);
       setExpandedBrowser(null);
       navigate(`/session/${session.browserId}`);
     },
-    onError: () => setStartingKey(null),
+    onError: (err: Error, variables) => {
+      setStartingKey(null);
+      push(`Failed to start ${variables.browserName} ${variables.browserVersion}`, err.message);
+    },
   });
 
-  const handleSelect = (name: string, version: string) => {
+  const startMutate = mutation.mutate;
+
+  const handleSelect = React.useCallback((name: string, version: string) => {
     const key = `${name}:${version}`;
     setStartingKey(key);
-    mutation.mutate({ browserName: name, browserVersion: version });
-  };
+    startMutate({ browserName: name, browserVersion: version });
+  }, [startMutate]);
 
-  const toggleDropdown = () => {
-    setDropdownOpen(o => {
-      if (o) setExpandedBrowser(null);
-      return !o;
-    });
-  };
+  const toggleDropdown = React.useCallback(() => {
+    setExpandedGroup(null);
+    setExpandedBrowser(null);
+    setDropdownOpen(o => !o);
+  }, []);
 
-  const toggleBrowser = (name: string) => {
-    setExpandedBrowser(cur => cur === name ? null : name);
-  };
+  const toggleGroup = React.useCallback((sessionType: string) => {
+    setExpandedBrowser(null);
+    setExpandedGroup(cur => cur === sessionType ? null : sessionType);
+  }, []);
+
+  const toggleBrowser = React.useCallback((key: string) => {
+    setExpandedBrowser(cur => cur === key ? null : key);
+  }, []);
 
   // ── stats ────────────────────────────────────────────────────────────────────
 
   const sortedBrowsers = React.useMemo(() =>
-    [...browsers].sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime()),
-    [browsers]);
+    browsers
+      .filter(b => typeFilter === null || sessionTypeLabel(b.sessionType) === typeFilter)
+      .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime()),
+    [browsers, typeFilter]);
+
+  const toggleTypeFilter = React.useCallback((sessionType: string) => {
+    setTypeFilter(cur => {
+      const next = cur === sessionType ? null : sessionType;
+      writeTypeFilter(next);
+      return next;
+    });
+  }, []);
+
+  React.useEffect(() => {
+    if (typeFilter === null || isLoading) return;
+    if (browsers.some(b => sessionTypeLabel(b.sessionType) === typeFilter)) return;
+    setTypeFilter(null);
+    writeTypeFilter(null);
+  }, [browsers, typeFilter, isLoading]);
 
   const stats = React.useMemo(() => {
     const sessionCount = new Map<string, number>();
@@ -238,6 +266,8 @@ export const Dashboard: React.FC = () => {
 
   return (
     <>
+      <ToastHost toasts={toasts} onDismiss={dismiss} />
+
       <header className="app-header">
         <div className="header-title">
           SELENOSIS-UI <span className="build-version">{buildNumber}</span>
@@ -250,31 +280,55 @@ export const Dashboard: React.FC = () => {
 
           {dropdownOpen && (
             <div className="create-browser-dropdown">
-              {browserGroups.length === 0 && (
-                <div className="create-browser-empty">No browsers configured</div>
+              {startGroups.length === 0 && (
+                <div className="create-browser-empty">
+                  {sessionGroups.length === 0 ? 'No browsers configured' : 'No Selenium browsers configured'}
+                </div>
               )}
 
-              {browserGroups.map(group => (
-                <div key={group.name}>
-                  <button
-                    className="browser-group-header"
-                    onClick={() => toggleBrowser(group.name)}
-                  >
-                    <span className="create-browser-icon">{getBrowserIcon(group.name)}</span>
-                    <span className="browser-group-name">{group.name}</span>
-                    <span className={`group-chevron ${expandedBrowser === group.name ? 'open' : ''}`}>▶</span>
-                  </button>
+              {startGroups.map(sessionGroup => {
+                return (
+                  <div key={sessionGroup.sessionType}>
+                    <button
+                      className="session-group-header"
+                      onClick={() => toggleGroup(sessionGroup.sessionType)}
+                    >
+                      <span className="session-group-title">{sessionGroup.sessionType}</span>
+                      <span className={`group-chevron ${expandedGroup === sessionGroup.sessionType ? 'open' : ''}`}>▶</span>
+                    </button>
 
-                  {expandedBrowser === group.name && (
-                    <VersionList
-                      versions={group.versions}
-                      browserName={group.name}
-                      startingKey={startingKey}
-                      onSelect={handleSelect}
-                    />
-                  )}
-                </div>
-              ))}
+                    {expandedGroup === sessionGroup.sessionType && (
+                      <>
+                        {sessionGroup.browsers.map(browser => {
+                          const key = `${sessionGroup.sessionType}:${browser.name}`;
+
+                          return (
+                            <div key={key}>
+                              <button
+                                className="browser-group-header"
+                                onClick={() => toggleBrowser(key)}
+                              >
+                                <span className="create-browser-icon">{getBrowserIcon(browser.name)}</span>
+                                <span className="browser-group-name">{browser.name}</span>
+                                <span className={`group-chevron ${expandedBrowser === key ? 'open' : ''}`}>▶</span>
+                              </button>
+
+                              {expandedBrowser === key && (
+                                <VersionList
+                                  versions={browser.versions}
+                                  browserName={browser.name}
+                                  startingKey={startingKey}
+                                  onSelect={handleSelect}
+                                />
+                              )}
+                            </div>
+                          );
+                        })}
+                      </>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -327,6 +381,14 @@ export const Dashboard: React.FC = () => {
                   )}
                 </div>
 
+                <div className="session-type-row">
+                  <SessionTypeBadge
+                    type={browser.sessionType}
+                    active={sessionTypeLabel(browser.sessionType) === typeFilter}
+                    onClick={toggleTypeFilter}
+                  />
+                </div>
+
                 <div className="browser-header-row">
                   <div className="browser-icon">{getBrowserIcon(browser.browserName)}</div>
                   <div>
@@ -350,7 +412,15 @@ export const Dashboard: React.FC = () => {
 
                 <div className="browser-meta">
                   <div>Uptime: <time>{formatUptime(browser.startTime)}</time></div>
-                  {browser.phase === 'Running' && !isDeleting ? (
+                  {browser.vnc === false ? (
+                    <button
+                      className="vnc-button disabled"
+                      disabled
+                      title="VNC is not available for this browser"
+                    >
+                      CONNECT
+                    </button>
+                  ) : browser.phase === 'Running' && !isDeleting ? (
                     <Link
                       to={`/session/${browser.browserId}`}
                       className="vnc-button"

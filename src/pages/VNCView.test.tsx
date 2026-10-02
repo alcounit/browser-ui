@@ -25,7 +25,7 @@ const rfb = vi.hoisted(() => {
     requestDesktopSize = vi.fn();
     scaleViewport = false;
     viewOnly = false;
-    localCursor = false;
+    showDotCursor = false;
     clipViewport = false;
     viewportDrag = false;
     constructor(_target: any, url: string, options: any) {
@@ -536,5 +536,80 @@ describe("window controls and clipboard", () => {
       await new Promise((r) => setTimeout(r, 1100));
     });
     expect(screen.getByText(/Uptime:/)).toBeInTheDocument();
+  });
+});
+
+describe("vnc availability", () => {
+  function mockAvailability(opts: { vnc?: boolean; probe: number | "error" }) {
+    localStorage.setItem(NAME_PREFIX + "chrome", "secret");
+    global.fetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/vnc")) {
+        if (opts.probe === "error") {
+          throw new Error("network down");
+        }
+        return { ok: opts.probe < 300, status: opts.probe } as any;
+      }
+      return {
+        ok: true,
+        json: async () => ({ browserId: "id-1", browserName: "chrome", browserVersion: "123", startTime: "2020-01-01T00:00:00Z", vnc: opts.vnc }),
+      } as any;
+    }) as any;
+  }
+
+  const probeCalls = () => (global.fetch as any).mock.calls.filter((c: any[]) => String(c[0]).endsWith("/vnc"));
+
+  it("does not connect or prompt when the browser declares no vnc", async () => {
+    mockAvailability({ vnc: false, probe: 204 });
+    renderView();
+
+    expect(await screen.findByText("VNC is not available for this browser")).toBeInTheDocument();
+    expect(rfb.instances.length).toBe(0);
+    expect(screen.queryByLabelText("VNC password")).toBeNull();
+    expect(probeCalls()).toHaveLength(0);
+  });
+
+  it("does not connect or prompt when the vnc server is unreachable", async () => {
+    mockAvailability({ probe: 503 });
+    renderView();
+
+    expect(await screen.findByText("VNC server is not reachable in this session")).toBeInTheDocument();
+    expect(rfb.instances.length).toBe(0);
+    expect(screen.queryByLabelText("VNC password")).toBeNull();
+  });
+
+  it("connects once the probe succeeds", async () => {
+    mockAvailability({ vnc: true, probe: 204 });
+    renderView();
+
+    await waitFor(() => expect(rfb.instances.length).toBe(1));
+    expect(probeCalls()).toHaveLength(1);
+  });
+
+  it("still tries to connect when the probe itself fails", async () => {
+    mockAvailability({ probe: "error" });
+    renderView();
+
+    await waitFor(() => expect(rfb.instances.length).toBe(1));
+  });
+
+  it("stops after the probe when the view is gone", async () => {
+    let releaseProbe: (value: any) => void = () => {};
+    localStorage.setItem(NAME_PREFIX + "chrome", "secret");
+    global.fetch = vi.fn((url: string) => {
+      if (url.endsWith("/vnc")) {
+        return new Promise((resolve) => { releaseProbe = resolve; });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ browserId: "id-1", browserName: "chrome", browserVersion: "123", startTime: "2020-01-01T00:00:00Z" }),
+      });
+    }) as any;
+
+    const view = renderView();
+    await waitFor(() => expect(probeCalls()).toHaveLength(1));
+    view.unmount();
+
+    await act(async () => releaseProbe({ ok: false, status: 503 }));
+    expect(rfb.instances.length).toBe(0);
   });
 });
