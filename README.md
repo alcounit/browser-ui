@@ -153,6 +153,7 @@ Configured via environment variables (read in `cmd/browser-ui/main.go`):
 | --- | --- | --- |
 | `LISTEN_ADDR` | `:8080` | HTTP listen address. |
 | `BROWSER_SERVICE_URL` | `http://browser-service:8080` | `browser-service` base URL. |
+| `SELENOSIS_URL` | `http://selenosis:4444` | selenosis hub base URL — used to create (`POST /session`) and delete (`DELETE /session/{id}`) browsers started from the UI. |
 | `BROWSER_NAMESPACE` | `default` | Namespace for session subscriptions. |
 | `BROWSER_STARTUP_TIMEOUT` | `3m` | Max wait for a manually started browser to become ready. |
 | `UI_STATIC_PATH` | `/app/static` | Path to the built frontend assets. |
