@@ -57,7 +57,7 @@ func cookieAuthMiddleware(authStore *auth.AuthStore, log zerolog.Logger) func(ht
 				http.Error(rw, "authentication failed", http.StatusUnauthorized)
 				return
 			}
-			req = req.WithContext(auth.WithOwner(req.Context(), auth.Owner{Name: parts[0]}))
+			req = req.WithContext(auth.WithCredentials(req.Context(), parts[0], parts[1]))
 			next.ServeHTTP(rw, req)
 		})
 	}

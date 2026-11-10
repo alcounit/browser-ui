@@ -161,6 +161,8 @@ Configured via environment variables (read in `cmd/browser-ui/main.go`):
 
 Basic Auth is optional. When `BASIC_AUTH_FILE` is set, the UI gates the API behind a login (`/auth/login` issues an HttpOnly cookie) and the file is watched for hot reload.
 
+Starting and deleting browsers goes through the selenosis hub, and browser-ui forwards the logged-in user's credentials there as Basic Auth. If selenosis has `BASIC_AUTH_FILE` set, **enable auth on both services with the same users file** (e.g. mount the same secret into both). Otherwise the hub rejects the request and the UI shows *selenosis rejected the credentials*. With auth on selenosis but off in browser-ui, there are no credentials to forward and starting browsers from the UI does not work.
+
 ---
 
 ## Endpoints
