@@ -56,6 +56,8 @@ const wdHubSessionPath = "/session"
 
 var vncProbeTimeout = 5 * time.Second
 
+const hubCredentialsRejected = "selenosis rejected the credentials — browser-ui and selenosis must use the same users file"
+
 const (
 	maxHubResponseBody = 1 << 20
 	maxHubErrorReason  = 512
@@ -99,10 +101,10 @@ func (s *Service) GetStatus(rw http.ResponseWriter, req *http.Request) {
 	log := logctx.FromContext(req.Context())
 
 	activeSessions := s.sessionStore.List()
-	if owner, ok := auth.OwnerFrom(req.Context()); ok {
+	if creds, ok := auth.CredentialsFrom(req.Context()); ok {
 		filtered := make([]*types.Session, 0, len(activeSessions))
 		for _, sess := range activeSessions {
-			if sess.Owner == owner.Name {
+			if sess.Owner == creds.Username() {
 				filtered = append(filtered, sess)
 			}
 		}
@@ -170,8 +172,8 @@ func (s *Service) CreateBrowser(rw http.ResponseWriter, req *http.Request) {
 	}
 	opts["annotations"] = annotations
 
-	if owner, ok := auth.OwnerFrom(req.Context()); ok {
-		labels := map[string]string{browserv1.SelenosisOwnerLabelKey: owner.Name}
+	if creds, ok := auth.CredentialsFrom(req.Context()); ok {
+		labels := map[string]string{browserv1.SelenosisOwnerLabelKey: creds.Username()}
 		if raw, ok := opts["labels"].(map[string]any); ok {
 			for k, v := range raw {
 				if s, ok := v.(string); ok && k != browserv1.SelenosisOwnerLabelKey {
@@ -211,6 +213,7 @@ func (s *Service) CreateBrowser(rw http.ResponseWriter, req *http.Request) {
 	}
 
 	innerReq.Header.Set("Content-Type", "application/json")
+	setHubCredentials(innerReq)
 	resp, err := httpClient.Do(innerReq)
 	if err != nil {
 		log.Error().Err(err).Msg("failed to post create session request")
@@ -226,6 +229,12 @@ func (s *Service) CreateBrowser(rw http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		log.Error().Err(err).Msg("failed to read create session response")
 		writeBrowserError(rw, http.StatusBadGateway, "failed to create browser", err.Error())
+		return
+	}
+
+	if resp.StatusCode == http.StatusUnauthorized {
+		log.Error().Msg("selenosis rejected the forwarded credentials")
+		writeBrowserError(rw, http.StatusBadGateway, "failed to create browser", hubCredentialsRejected)
 		return
 	}
 
@@ -298,6 +307,7 @@ func (s *Service) DeleteBrowser(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	setHubCredentials(innerReq)
 	resp, err := httpClient.Do(innerReq)
 	if err != nil {
 		log.Error().Err(err).Msg("failed to send delete session request")
@@ -308,6 +318,12 @@ func (s *Service) DeleteBrowser(rw http.ResponseWriter, req *http.Request) {
 		io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
 	}()
+
+	if resp.StatusCode == http.StatusUnauthorized {
+		log.Error().Msg("selenosis rejected the forwarded credentials")
+		http.Error(rw, hubCredentialsRejected, http.StatusBadGateway)
+		return
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		log.Error().Str("status", resp.Status).Msg("delete session request failed")
@@ -467,6 +483,12 @@ func isNormalWSDisconnect(err error) bool {
 	}
 
 	return false
+}
+
+func setHubCredentials(req *http.Request) {
+	if c, ok := auth.CredentialsFrom(req.Context()); ok {
+		req.SetBasicAuth(c.Username(), c.Password())
+	}
 }
 
 func hubError(body []byte, status string) string {

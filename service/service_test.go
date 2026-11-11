@@ -557,7 +557,7 @@ func TestGetStatusFiltersSessionsByOwner(t *testing.T) {
 
 	svc := NewService(testHubURL, st, store.NewDefaultStore[types.BrowserVersions](), 5*time.Second)
 	req := httptest.NewRequest(http.MethodGet, "/status", nil)
-	req = req.WithContext(auth.WithOwner(req.Context(), auth.Owner{Name: "alice"}))
+	req = req.WithContext(auth.WithCredentials(req.Context(), "alice", "secret"))
 	rw := httptest.NewRecorder()
 
 	svc.GetStatus(rw, req)
@@ -805,7 +805,7 @@ func TestCreateBrowserSendsOwnerLabel(t *testing.T) {
 	rw := httptest.NewRecorder()
 
 	req := createBrowserRequest(t, `{"browserName":"chrome","browserVersion":"120"}`)
-	req = req.WithContext(auth.WithOwner(req.Context(), auth.Owner{Name: "ui-user"}))
+	req = req.WithContext(auth.WithCredentials(req.Context(), "ui-user", "secret"))
 
 	svc.CreateBrowser(rw, req)
 
@@ -833,7 +833,7 @@ func TestCreateBrowserCallerCannotOverrideOwnerLabel(t *testing.T) {
 	body := `{"browserName":"chrome","browserVersion":"120","selenosisOptions":{"labels":{"` +
 		browserv1.SelenosisOwnerLabelKey + `":"someone-else","team":"qa"}}}`
 	req := createBrowserRequest(t, body)
-	req = req.WithContext(auth.WithOwner(req.Context(), auth.Owner{Name: "ui-user"}))
+	req = req.WithContext(auth.WithCredentials(req.Context(), "ui-user", "secret"))
 
 	svc.CreateBrowser(rw, req)
 
@@ -1467,5 +1467,95 @@ func TestGetBrowserExposesVNCFlag(t *testing.T) {
 	}
 	if vnc, ok := got["vnc"]; !ok || vnc != false {
 		t.Fatalf("expected vnc=false in the response, got %v (present=%v)", vnc, ok)
+	}
+}
+
+func TestHubCallsForwardCredentials(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   string
+		call   func(svc *Service, rw http.ResponseWriter, req *http.Request)
+		req    func(t *testing.T) *http.Request
+	}{
+		{
+			name:   "create",
+			status: http.StatusOK,
+			body:   createdSessionBody("s1"),
+			call:   func(svc *Service, rw http.ResponseWriter, req *http.Request) { svc.CreateBrowser(rw, req) },
+			req: func(t *testing.T) *http.Request {
+				return createBrowserRequest(t, `{"browserName":"chrome","browserVersion":"120"}`)
+			},
+		},
+		{
+			name:   "delete",
+			status: http.StatusOK,
+			call:   func(svc *Service, rw http.ResponseWriter, req *http.Request) { svc.DeleteBrowser(rw, req) },
+			req: func(t *testing.T) *http.Request {
+				return requestWithParam(http.MethodDelete, "/browsers/b1", "browserId", "b1")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name+" with credentials", func(t *testing.T) {
+			m := useTransport(t, &mockTransport{resp: hubResponse(tt.status, tt.body)})
+			st := seededStore(t, &types.Session{BrowserId: "b1", SessionId: "s1", StartedManually: true})
+			svc := NewService(testHubURL, st, store.NewDefaultStore[types.BrowserVersions](), 5*time.Second)
+
+			req := tt.req(t)
+			req = req.WithContext(auth.WithCredentials(req.Context(), "user1", "secret1"))
+			tt.call(svc, httptest.NewRecorder(), req)
+
+			user, pass, ok := m.gotReq.BasicAuth()
+			if !ok || user != "user1" || pass != "secret1" {
+				t.Fatalf("expected Basic Auth user1/secret1 on the hub request, got %q/%q (present=%v)", user, pass, ok)
+			}
+		})
+
+		t.Run(tt.name+" without credentials", func(t *testing.T) {
+			m := useTransport(t, &mockTransport{resp: hubResponse(tt.status, tt.body)})
+			st := seededStore(t, &types.Session{BrowserId: "b1", SessionId: "s1", StartedManually: true})
+			svc := NewService(testHubURL, st, store.NewDefaultStore[types.BrowserVersions](), 5*time.Second)
+
+			tt.call(svc, httptest.NewRecorder(), tt.req(t))
+
+			if got := m.gotReq.Header.Get("Authorization"); got != "" {
+				t.Fatalf("expected no Authorization header, got %q", got)
+			}
+		})
+	}
+}
+
+func TestCreateBrowserHubRejectsCredentials(t *testing.T) {
+	useTransport(t, &mockTransport{resp: hubResponse(http.StatusUnauthorized, "authentication failed")})
+
+	svc := NewService(testHubURL, store.NewDefaultStore[*types.Session](), store.NewDefaultStore[types.BrowserVersions](), 5*time.Second)
+	rw := httptest.NewRecorder()
+
+	svc.CreateBrowser(rw, createBrowserRequest(t, `{"browserName":"chrome","browserVersion":"120"}`))
+
+	if rw.Code != http.StatusBadGateway {
+		t.Fatalf("expected status 502, got %d", rw.Code)
+	}
+	if !strings.Contains(rw.Body.String(), "same users file") {
+		t.Fatalf("expected the credentials hint in the reason, got %s", rw.Body.String())
+	}
+}
+
+func TestDeleteBrowserHubRejectsCredentials(t *testing.T) {
+	useTransport(t, &mockTransport{resp: hubResponse(http.StatusUnauthorized, "authentication failed")})
+
+	st := seededStore(t, &types.Session{BrowserId: "b1", SessionId: "s1", StartedManually: true})
+	svc := NewService(testHubURL, st, store.NewDefaultStore[types.BrowserVersions](), 5*time.Second)
+	rw := httptest.NewRecorder()
+
+	svc.DeleteBrowser(rw, requestWithParam(http.MethodDelete, "/browsers/b1", "browserId", "b1"))
+
+	if rw.Code != http.StatusBadGateway {
+		t.Fatalf("expected status 502, got %d", rw.Code)
+	}
+	if !strings.Contains(rw.Body.String(), "same users file") {
+		t.Fatalf("expected the credentials hint in the body, got %s", rw.Body.String())
 	}
 }
