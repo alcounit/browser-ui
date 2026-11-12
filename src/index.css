@@ -674,3 +674,77 @@ button.session-type-badge:focus-visible {
   background: var(--primary); color: #fff; border-color: var(--primary);
 }
 .vnc-modal-btn[type="submit"]:hover:not(:disabled) { background: var(--primary-hover); }
+
+:root { color-scheme: light; }
+
+[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #0e1014;
+  --surface: rgba(24, 27, 34, 0.92);
+  --surface-alt: rgba(18, 21, 27, 0.94);
+  --card-bg: rgba(24, 27, 34, 0.9);
+  --text: #e7e9ee;
+  --text-secondary: #9aa1ad;
+  --border: rgba(255, 255, 255, 0.10);
+  --primary: #3b82f6;
+  --primary-hover: #60a5fa;
+  --success: #34d399;
+  --disabled: #5b6270;
+  --shadow-large: 0 20px 50px rgba(0, 0, 0, 0.6);
+}
+
+[data-theme='dark'] .browser-icon,
+[data-theme='dark'] .create-browser-icon {
+  background: #262b35;
+  color: var(--text);
+}
+
+[data-theme='dark'] .browser-id,
+[data-theme='dark'] .detail-label,
+[data-theme='dark'] .detail-row,
+[data-theme='dark'] .vnc-placeholder {
+  color: var(--text-secondary);
+}
+
+[data-theme='dark'] .create-browser-dropdown {
+  background: #1a1e26;
+  border-color: var(--border);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+}
+
+[data-theme='dark'] .clipboard-prompt {
+  background: #1a1e26;
+  color: var(--text);
+}
+
+[data-theme='dark'] .clipboard-prompt-input {
+  background: #12161d;
+  color: var(--text);
+  border-color: var(--border);
+}
+
+[data-theme='dark'] .clipboard-prompt-actions .clipboard-btn {
+  background: #262b35;
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.theme-toggle {
+  margin-left: 16px;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.2s;
+}
+
+.theme-toggle:hover { background: var(--border); }

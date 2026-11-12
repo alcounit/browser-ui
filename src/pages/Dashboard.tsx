@@ -8,6 +8,7 @@ import { ToastHost, useToasts } from '../components/Toast';
 import { readTypeFilter, writeTypeFilter } from '../lib/sessionFilter';
 import { buildCatalog, creatableGroups, flattenBrowsers, startBrowserError, type SessionGroup, type SupportedBrowsers } from '../lib/browserCatalog';
 import { sessionTypeLabel } from '../lib/sessionType';
+import { applyTheme, getInitialTheme, type Theme } from '../lib/theme';
 
 const buildNumber = __BUILD_NUMBER__;
 
@@ -127,6 +128,16 @@ const VersionList: React.FC<VersionListProps> = ({ versions, browserName, starti
 // ── Dashboard ──────────────────────────────────────────────────────────────────
 
 export const Dashboard: React.FC = () => {
+  const [theme, setTheme] = React.useState<Theme>(getInitialTheme);
+
+  const toggleTheme = React.useCallback(() => {
+    setTheme(current => {
+      const next: Theme = current === 'dark' ? 'light' : 'dark';
+      applyTheme(next);
+      return next;
+    });
+  }, []);
+
   const navigate = useNavigate();
   const { authEnabled, onUnauthorized } = useAuth();
 
@@ -342,6 +353,15 @@ export const Dashboard: React.FC = () => {
             {logoutMutation.isPending ? 'Signing out…' : 'Sign out'}
           </button>
         )}
+
+        <button
+          className="theme-toggle"
+          onClick={toggleTheme}
+          title={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
+          aria-label="Toggle color theme"
+        >
+          {theme === 'dark' ? '☀' : '☾'}
+        </button>
 
         <div className="header-stats">
           <div className="stat-item">BROWSERS TOTAL: <strong>{stats.total}</strong></div>
