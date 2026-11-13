@@ -748,3 +748,5 @@ button.session-type-badge:focus-visible {
 }
 
 .theme-toggle:hover { background: var(--border); }
+
+[data-theme='dark'] .clipboard-icon { filter: invert(1); }
