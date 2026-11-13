@@ -11,6 +11,7 @@ type Session struct {
 	BrowserIP       string          `json:"-"`
 	BrowserName     string          `json:"browserName"`
 	BrowserVersion  string          `json:"browserVersion"`
+	Name            string          `json:"name,omitempty"`
 	Owner           string          `json:"owner,omitempty"`
 	SessionType     string          `json:"sessionType,omitempty"`
 	StartedManually bool            `json:"startedManually"`
