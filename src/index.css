@@ -674,3 +674,13 @@ button.session-type-badge:focus-visible {
   background: var(--primary); color: #fff; border-color: var(--primary);
 }
 .vnc-modal-btn[type="submit"]:hover:not(:disabled) { background: var(--primary-hover); }
+
+.browser-test-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary);
+  margin: -6px 0 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
