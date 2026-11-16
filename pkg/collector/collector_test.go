@@ -1127,3 +1127,27 @@ func TestSessionVNCOverrideSurvivesConfigChanges(t *testing.T) {
 		t.Fatal("expected the session override to survive a config delete")
 	}
 }
+
+func TestStoreSessionKeepsTestName(t *testing.T) {
+	st := store.NewDefaultStore[*types.Session]()
+	col := NewCollector(&fakeClient{}, &fakeConfigClient{}, "default", st,
+		store.NewDefaultStore[types.BrowserVersions](), nil)
+
+	browser := &browserv1.Browser{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "browser-1",
+			Annotations: map[string]string{types.TestNameAnnotationKey: "mpqa - test_example[chrome]"},
+		},
+		Spec: browserv1.BrowserSpec{BrowserName: "chrome", BrowserVersion: "123"},
+	}
+
+	storeSession("session-1", browser, col)
+
+	sess, ok := st.Get("browser-1")
+	if !ok {
+		t.Fatalf("session was not stored")
+	}
+	if sess.Name != "mpqa - test_example[chrome]" {
+		t.Fatalf("unexpected name: %#v", sess.Name)
+	}
+}

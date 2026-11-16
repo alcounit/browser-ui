@@ -281,6 +281,7 @@ func storeSession(sessionId string, browser *browserv1.Browser, c *Collector) {
 		BrowserIP:       browser.Status.PodIP,
 		BrowserName:     browser.Spec.BrowserName,
 		BrowserVersion:  browser.Spec.BrowserVersion,
+		Name:            browser.Annotations[types.TestNameAnnotationKey],
 		Owner:           browser.Labels[browserv1.SelenosisOwnerLabelKey],
 		SessionType:     browser.Annotations[browserv1.SelenosisSessionTypeAnnotationKey],
 		StartedManually: browser.Annotations["startedManually"] == "true",
