@@ -15,6 +15,7 @@ const buildNumber = __BUILD_NUMBER__;
 interface Session {
   sessionId: string;
   browserId: string;
+  name?: string;
   browserName: string;
   browserVersion: string;
   startTime: string;
@@ -408,6 +409,12 @@ export const Dashboard: React.FC = () => {
                     onClick={toggleTypeFilter}
                   />
                 </div>
+
+                {browser.name && (
+                  <div className="browser-test-name" title={browser.name}>
+                    {browser.name}
+                  </div>
+                )}
 
                 <div className="browser-header-row">
                   <div className="browser-icon">{getBrowserIcon(browser.browserName)}</div>

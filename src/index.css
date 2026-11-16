@@ -750,3 +750,12 @@ button.session-type-badge:focus-visible {
 .theme-toggle:hover { background: var(--border); }
 
 [data-theme='dark'] .clipboard-icon { filter: invert(1); }
+.browser-test-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary);
+  margin: -6px 0 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
