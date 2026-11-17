@@ -467,7 +467,10 @@ export const Dashboard: React.FC = () => {
                     const isDeleting = deletingIds.has(browser.browserId);
                     return (
                       <tr key={browser.browserId} className={isDeleting ? 'deleting' : ''}>
-                        <td className="cell-id">{browser.browserId}</td>
+                        <td className="cell-id">
+                          {browser.browserId}
+                          {browser.startedManually && <span className="manual-tag">manual</span>}
+                        </td>
                         <td className="cell-test" title={browser.name}>{browser.name ?? ''}</td>
                         <td>{browser.browserName} {browser.browserVersion}</td>
                         <td>{sessionTypeLabel(browser.sessionType)}</td>

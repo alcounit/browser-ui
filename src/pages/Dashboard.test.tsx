@@ -541,3 +541,15 @@ describe("Dashboard table view", () => {
     expect(document.querySelectorAll(".session-table tbody tr")).toHaveLength(1);
   });
 });
+
+describe("Dashboard manual sessions in table", () => {
+  it("marks a manually started session in the name column", async () => {
+    mockStatus([], [runningSession]);
+    renderDashboard();
+    await screen.findByText("b-1");
+
+    await userEvent.click(screen.getByRole("button", { name: "Table" }));
+
+    expect(document.querySelector(".session-table .manual-tag")).not.toBeNull();
+  });
+});
