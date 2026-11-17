@@ -816,30 +816,7 @@ button.session-type-badge:focus-visible {
 
 .session-table .cell-id { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-.manual-delete-link {
-  border: 0;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 11px;
-  cursor: pointer;
-  margin-right: 10px;
-  text-decoration: underline;
-}
-
-.manual-delete-link:hover { color: #ff5f57; }
-
 .detail-row { min-width: 0; }
 .detail-row .detail-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.manual-tag {
-  margin-left: 8px;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.3px;
-  text-transform: uppercase;
-  padding: 2px 6px;
-  border-radius: 5px;
-  color: #34c759;
-  background: rgba(52, 199, 89, 0.12);
-  border: 1px solid rgba(52, 199, 89, 0.3);
-}
+.session-table .manual-badge-wrapper { margin-left: 8px; vertical-align: middle; }

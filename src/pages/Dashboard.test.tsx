@@ -550,6 +550,7 @@ describe("Dashboard manual sessions in table", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Table" }));
 
-    expect(document.querySelector(".session-table .manual-tag")).not.toBeNull();
+    expect(document.querySelector(".session-table .manual-badge-label")).not.toBeNull();
+    expect(document.querySelector(".session-table .manual-badge-delete")).not.toBeNull();
   });
 });

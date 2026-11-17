@@ -469,7 +469,15 @@ export const Dashboard: React.FC = () => {
                       <tr key={browser.browserId} className={isDeleting ? 'deleting' : ''}>
                         <td className="cell-id">
                           {browser.browserId}
-                          {browser.startedManually && <span className="manual-tag">manual</span>}
+                          {browser.startedManually && !isDeleting && (
+                            <span className="manual-badge-wrapper">
+                              <span className="manual-badge-label">manual</span>
+                              <button
+                                className="manual-badge-delete"
+                                onClick={() => deleteMutation.mutate(browser.browserId)}
+                              >delete</button>
+                            </span>
+                          )}
                         </td>
                         <td className="cell-test" title={browser.name}>{browser.name ?? ''}</td>
                         <td>{browser.browserName} {browser.browserVersion}</td>
@@ -478,14 +486,6 @@ export const Dashboard: React.FC = () => {
                         <td>{new Date(browser.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
                         <td>{formatUptime(browser.startTime)}</td>
                         <td className="cell-actions">
-                          {browser.startedManually && !isDeleting && (
-                            <button
-                              className="manual-delete-link"
-                              onClick={() => deleteMutation.mutate(browser.browserId)}
-                            >
-                              delete
-                            </button>
-                          )}
                           {renderConnect(browser, isDeleting)}
                         </td>
                       </tr>
