@@ -499,3 +499,45 @@ describe("Dashboard vnc availability", () => {
     expect(screen.getByRole("link", { name: "CONNECT" })).toHaveAttribute("href", "/session/b-vnc");
   });
 });
+
+describe("Dashboard table view", () => {
+  const named = { ...session("b-1", "selenium"), name: "checkout smoke" };
+
+  it("shows the test name as a details row on the card", async () => {
+    mockStatus([], [named]);
+    renderDashboard();
+    await screen.findByText("b-1");
+
+    expect(screen.getByText("Test")).toBeInTheDocument();
+    expect(screen.getByText("checkout smoke")).toBeInTheDocument();
+  });
+
+  it("switches to a table with the expected columns", async () => {
+    mockStatus([], [named]);
+    renderDashboard();
+    await screen.findByText("b-1");
+
+    await userEvent.click(screen.getByRole("button", { name: "Table" }));
+
+    const heads = [...document.querySelectorAll(".session-table th")].map(th => th.textContent ?? "");
+    expect(heads).toEqual(["Name", "Test", "Browser", "Type", "Status", "Started", "Uptime", ""]);
+
+    const idCell = document.querySelector(".session-table .cell-id");
+    expect(idCell?.textContent).toBe("b-1");
+    expect(idCell?.querySelector("button")).toBeNull();
+    expect(screen.getByText("checkout smoke")).toBeInTheDocument();
+  });
+
+  it("filters by browser id and returns to cards", async () => {
+    mockStatus([], [session("b-1", "selenium"), session("b-2", "selenium")]);
+    renderDashboard();
+    await screen.findByText("b-1");
+
+    await userEvent.type(screen.getByPlaceholderText(/Search by test name/), "b-2");
+    const ids = [...document.querySelectorAll(".browser-uuid")].map(el => el.textContent);
+    expect(ids).toEqual(["b-2"]);
+
+    await userEvent.click(screen.getByRole("button", { name: "Table" }));
+    expect(document.querySelectorAll(".session-table tbody tr")).toHaveLength(1);
+  });
+});

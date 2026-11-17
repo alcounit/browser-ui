@@ -759,3 +759,74 @@ button.session-type-badge:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; }
+
+.search-input {
+  flex: 1;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--card-bg);
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+}
+
+.search-input:focus { border-color: var(--primary); }
+
+.view-switch { display: inline-flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+
+.view-switch button {
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 8px 14px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.view-switch button.active { background: var(--primary); color: #fff; }
+
+.session-table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
+
+.session-table th {
+  text-align: left;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.session-table td { padding: 12px; border-bottom: 1px solid var(--border); color: var(--text); }
+.session-table tr.deleting { opacity: 0.5; }
+.session-table .cell-id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text-secondary); }
+.session-table .cell-test { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-table .cell-actions { text-align: right; white-space: nowrap; }
+
+.session-table .col-name { width: 24%; }
+.session-table .col-test { width: 18%; }
+.session-table .col-browser { width: 14%; }
+.session-table .col-type { width: 10%; }
+.session-table .col-status { width: 9%; }
+.session-table .col-time { width: 7%; }
+.session-table .col-actions { width: 11%; }
+
+.session-table .cell-id { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.manual-delete-link {
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  margin-right: 10px;
+  text-decoration: underline;
+}
+
+.manual-delete-link:hover { color: #ff5f57; }
+
+.detail-row { min-width: 0; }
+.detail-row .detail-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
