@@ -165,6 +165,8 @@ export const Dashboard: React.FC = () => {
   const wrapperRef = React.useRef<HTMLDivElement>(null);
   const { toasts, push, dismiss } = useToasts();
   const [typeFilter, setTypeFilter] = React.useState<string | null>(() => readTypeFilter());
+  const [query, setQuery] = React.useState('');
+  const [view, setView] = React.useState<'cards' | 'table'>('cards');
 
   React.useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
@@ -249,6 +251,47 @@ export const Dashboard: React.FC = () => {
       .filter(b => typeFilter === null || sessionTypeLabel(b.sessionType) === typeFilter)
       .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime()),
     [browsers, typeFilter]);
+
+  const visibleBrowsers = React.useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return sortedBrowsers;
+    return sortedBrowsers.filter(b =>
+      (b.name ?? '').toLowerCase().includes(q)
+      || b.browserName.toLowerCase().includes(q)
+      || b.browserId.toLowerCase().includes(q)
+      || b.sessionId.toLowerCase().includes(q));
+  }, [sortedBrowsers, query]);
+
+  const copyId = async (id: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(id);
+      push(`${label} copied`, id);
+    } catch {
+      push(`Could not copy ${label.toLowerCase()}`, id);
+    }
+  };
+
+  const renderConnect = (browser: Session, isDeleting: boolean) => {
+    if (browser.vnc === false) {
+      return (
+        <button className="vnc-button disabled" disabled title="VNC is not available for this browser">
+          CONNECT
+        </button>
+      );
+    }
+    if (browser.phase === 'Running' && !isDeleting) {
+      return (
+        <Link
+          to={`/session/${browser.browserId}`}
+          className="vnc-button"
+          state={{ sessionStartTime: browser.startTime }}
+        >
+          CONNECT
+        </Link>
+      );
+    }
+    return <button className="vnc-button disabled" disabled>CONNECT</button>;
+  };
 
   const toggleTypeFilter = React.useCallback((sessionType: string) => {
     setTypeFilter(cur => {
@@ -381,8 +424,78 @@ export const Dashboard: React.FC = () => {
         {isLoading && browsers.length === 0 ? (
           <div style={{ textAlign: 'center', marginTop: 40, color: '#666' }}>Loading sessions...</div>
         ) : (
+          <>
+            <div className="toolbar">
+              <input
+                className="search-input"
+                placeholder="Search by test name, browser or session ID"
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+              />
+              <div className="view-switch">
+                <button
+                  className={view === 'cards' ? 'active' : ''}
+                  onClick={() => setView('cards')}
+                >
+                  Cards
+                </button>
+                <button
+                  className={view === 'table' ? 'active' : ''}
+                  onClick={() => setView('table')}
+                >
+                  Table
+                </button>
+              </div>
+            </div>
+
+            {view === 'table' ? (
+              <table className="session-table">
+                <thead>
+                  <tr>
+                    <th className="col-name">Name</th>
+                    <th className="col-test">Test</th>
+                    <th className="col-browser">Browser</th>
+                    <th className="col-type">Type</th>
+                    <th className="col-status">Status</th>
+                    <th className="col-time">Started</th>
+                    <th className="col-time">Uptime</th>
+                    <th className="col-actions"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleBrowsers.map(browser => {
+                    const isDeleting = deletingIds.has(browser.browserId);
+                    return (
+                      <tr key={browser.browserId} className={isDeleting ? 'deleting' : ''}>
+                        <td className="cell-id">
+                          {browser.browserId}
+                          {browser.startedManually && !isDeleting && (
+                            <span className="manual-badge-wrapper">
+                              <span className="manual-badge-label">manual</span>
+                              <button
+                                className="manual-badge-delete"
+                                onClick={() => deleteMutation.mutate(browser.browserId)}
+                              >delete</button>
+                            </span>
+                          )}
+                        </td>
+                        <td className="cell-test" title={browser.name}>{browser.name ?? ''}</td>
+                        <td>{browser.browserName} {browser.browserVersion}</td>
+                        <td>{sessionTypeLabel(browser.sessionType)}</td>
+                        <td>{browser.phase}</td>
+                        <td>{new Date(browser.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
+                        <td>{formatUptime(browser.startTime)}</td>
+                        <td className="cell-actions">
+                          {renderConnect(browser, isDeleting)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            ) : (
           <div className="container-grid">
-            {sortedBrowsers.map((browser) => {
+            {visibleBrowsers.map((browser) => {
               const isDeleting = deletingIds.has(browser.browserId);
               return (
               <div
@@ -410,12 +523,6 @@ export const Dashboard: React.FC = () => {
                   />
                 </div>
 
-                {browser.name && (
-                  <div className="browser-test-name" title={browser.name}>
-                    {browser.name}
-                  </div>
-                )}
-
                 <div className="browser-header-row">
                   <div className="browser-icon">{getBrowserIcon(browser.browserName)}</div>
                   <div>
@@ -435,33 +542,23 @@ export const Dashboard: React.FC = () => {
                     <span className="detail-label">Status</span>
                     <span className="detail-value">{browser.phase}</span>
                   </div>
+                  {browser.name && (
+                    <div className="detail-row">
+                      <span className="detail-label">Test</span>
+                      <span className="detail-value" title={browser.name}>{browser.name}</span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="browser-meta">
                   <div>Uptime: <time>{formatUptime(browser.startTime)}</time></div>
-                  {browser.vnc === false ? (
-                    <button
-                      className="vnc-button disabled"
-                      disabled
-                      title="VNC is not available for this browser"
-                    >
-                      CONNECT
-                    </button>
-                  ) : browser.phase === 'Running' && !isDeleting ? (
-                    <Link
-                      to={`/session/${browser.browserId}`}
-                      className="vnc-button"
-                      state={{ sessionStartTime: browser.startTime }}
-                    >
-                      CONNECT
-                    </Link>
-                  ) : (
-                    <button className="vnc-button disabled" disabled>CONNECT</button>
-                  )}
+                  {renderConnect(browser, isDeleting)}
                 </div>
               </div>
             ); })}
           </div>
+            )}
+          </>
         )}
       </main>
     </>
