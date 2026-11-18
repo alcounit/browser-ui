@@ -15,6 +15,11 @@ export function formatUptime(startTime: string | null | undefined): string {
   return `${seconds}s`;
 }
 
+export function formatStartTime(startTime: string | null | undefined): string {
+  if (!startTime) return '';
+  return new Date(startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
 export function getBrowserIcon(name: string): string {
   if (!name) return '?';
   const n = name.toLowerCase();

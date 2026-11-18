@@ -1,7 +1,7 @@
 import React from "react";
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
-import { formatUptime, getBrowserIcon } from '../utils';
+import { formatStartTime, formatUptime, getBrowserIcon } from '../utils';
 import { useAuth } from '../App';
 import { SessionTypeBadge } from '../components/SessionTypeBadge';
 import { ToastHost, useToasts } from '../components/Toast';
@@ -15,7 +15,7 @@ const buildNumber = __BUILD_NUMBER__;
 interface Session {
   sessionId: string;
   browserId: string;
-  name?: string;
+  testName?: string;
   browserName: string;
   browserVersion: string;
   startTime: string;
@@ -256,20 +256,11 @@ export const Dashboard: React.FC = () => {
     const q = query.trim().toLowerCase();
     if (!q) return sortedBrowsers;
     return sortedBrowsers.filter(b =>
-      (b.name ?? '').toLowerCase().includes(q)
+      (b.testName ?? '').toLowerCase().includes(q)
       || b.browserName.toLowerCase().includes(q)
       || b.browserId.toLowerCase().includes(q)
       || b.sessionId.toLowerCase().includes(q));
   }, [sortedBrowsers, query]);
-
-  const copyId = async (id: string, label: string) => {
-    try {
-      await navigator.clipboard.writeText(id);
-      push(`${label} copied`, id);
-    } catch {
-      push(`Could not copy ${label.toLowerCase()}`, id);
-    }
-  };
 
   const renderConnect = (browser: Session, isDeleting: boolean) => {
     if (browser.vnc === false) {
@@ -449,6 +440,7 @@ export const Dashboard: React.FC = () => {
             </div>
 
             {view === 'table' ? (
+              <div className="session-table-wrap">
               <table className="session-table">
                 <thead>
                   <tr>
@@ -467,8 +459,20 @@ export const Dashboard: React.FC = () => {
                     const isDeleting = deletingIds.has(browser.browserId);
                     return (
                       <tr key={browser.browserId} className={isDeleting ? 'deleting' : ''}>
-                        <td className="cell-id">
-                          {browser.browserId}
+                        <td className="cell-id">{browser.browserId}</td>
+                        <td className="cell-test" title={browser.testName}>{browser.testName ?? ''}</td>
+                        <td>{browser.browserName} {browser.browserVersion}</td>
+                        <td>
+                          <SessionTypeBadge
+                            type={browser.sessionType}
+                            active={sessionTypeLabel(browser.sessionType) === typeFilter}
+                            onClick={toggleTypeFilter}
+                          />
+                        </td>
+                        <td>{browser.phase}</td>
+                        <td>{formatStartTime(browser.startTime)}</td>
+                        <td>{formatUptime(browser.startTime)}</td>
+                        <td className="cell-actions">
                           {browser.startedManually && !isDeleting && (
                             <span className="manual-badge-wrapper">
                               <span className="manual-badge-label">manual</span>
@@ -478,14 +482,6 @@ export const Dashboard: React.FC = () => {
                               >delete</button>
                             </span>
                           )}
-                        </td>
-                        <td className="cell-test" title={browser.name}>{browser.name ?? ''}</td>
-                        <td>{browser.browserName} {browser.browserVersion}</td>
-                        <td>{sessionTypeLabel(browser.sessionType)}</td>
-                        <td>{browser.phase}</td>
-                        <td>{new Date(browser.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
-                        <td>{formatUptime(browser.startTime)}</td>
-                        <td className="cell-actions">
                           {renderConnect(browser, isDeleting)}
                         </td>
                       </tr>
@@ -493,6 +489,7 @@ export const Dashboard: React.FC = () => {
                   })}
                 </tbody>
               </table>
+              </div>
             ) : (
           <div className="container-grid">
             {visibleBrowsers.map((browser) => {
@@ -538,16 +535,20 @@ export const Dashboard: React.FC = () => {
                       {browser.sessionId}
                     </span>
                   </div>
+                  {browser.testName && (
+                    <div className="detail-row">
+                      <span className="detail-label">Test</span>
+                      <span className="detail-value" title={browser.testName}>{browser.testName}</span>
+                    </div>
+                  )}
                   <div className="detail-row">
                     <span className="detail-label">Status</span>
                     <span className="detail-value">{browser.phase}</span>
                   </div>
-                  {browser.name && (
-                    <div className="detail-row">
-                      <span className="detail-label">Test</span>
-                      <span className="detail-value" title={browser.name}>{browser.name}</span>
-                    </div>
-                  )}
+                  <div className="detail-row">
+                    <span className="detail-label">Started</span>
+                    <span className="detail-value">{formatStartTime(browser.startTime)}</span>
+                  </div>
                 </div>
 
                 <div className="browser-meta">

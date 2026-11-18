@@ -750,15 +750,6 @@ button.session-type-badge:focus-visible {
 .theme-toggle:hover { background: var(--border); }
 
 [data-theme='dark'] .clipboard-icon { filter: invert(1); }
-.browser-test-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--primary);
-  margin: -6px 0 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 .toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; }
 
@@ -788,7 +779,9 @@ button.session-type-badge:focus-visible {
 
 .view-switch button.active { background: var(--primary); color: #fff; }
 
-.session-table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
+.session-table-wrap { overflow-x: auto; }
+
+.session-table { width: 100%; min-width: 1100px; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
 
 .session-table th {
   text-align: left;
@@ -806,17 +799,14 @@ button.session-type-badge:focus-visible {
 .session-table .cell-test { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-table .cell-actions { text-align: right; white-space: nowrap; }
 
-.session-table .col-name { width: 30%; }
-.session-table .col-test { width: 16%; }
-.session-table .col-browser { width: 12%; }
-.session-table .col-type { width: 9%; }
-.session-table .col-status { width: 8%; }
-.session-table .col-time { width: 7%; }
-.session-table .col-actions { width: 11%; }
+.session-table .col-name,
+.session-table .col-test { width: 320px; }
+.session-table .col-actions { width: 210px; }
+.session-table .session-type-badge { margin: 0; }
 
 .session-table .cell-id { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .detail-row { min-width: 0; }
 .detail-row .detail-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.session-table .manual-badge-wrapper { margin-left: 8px; vertical-align: middle; }
+.session-table .manual-badge-wrapper { margin-right: 12px; vertical-align: middle; }

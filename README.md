@@ -62,7 +62,7 @@ Before connecting, the viewer checks that the session has a VNC server at all (s
 
 ## Configuring browsers for the UI
 
-browser-ui reads two annotations to decide how a browser is shown. Both are plain annotations — no CRD change is involved.
+browser-ui reads three annotations to decide how a browser is shown. All are plain annotations — no CRD change is involved.
 
 ### `selenosis.io/session.type`
 
@@ -94,6 +94,20 @@ Whether the session has a VNC server. **VNC is available only when the value is 
 When VNC is off, the session card shows a disabled **CONNECT** with the hint *VNC is not available for this browser*, and opening the viewer directly shows the same message instead of a password prompt.
 
 When VNC is declared but the server is not actually there (misconfigured image, crashed server), the viewer probes the session first — `GET /api/v1/browsers/{id}/vnc` without a WebSocket upgrade — and shows *VNC server is not reachable in this session* on `503`.
+
+### `selenosis.io/session.testname`
+
+A free-form name of the test that owns the session, e.g. `checkout - test_pay[chrome]`. It only labels the session; it has no effect on how the browser runs.
+
+| Where | How |
+| --- | --- |
+| Per session | selenosis option `annotations.selenosis.io/session.testname` — as a query parameter (Playwright / DevTools / MCP) or in `selenosis:options` (Selenium). selenosis copies `annotations.*` onto the Browser CR. |
+
+- **Card** — a *Test* row under *Session ID*; a long name is cut with an ellipsis, the full name is in the tooltip.
+- **Table** — the *Test* column, cut the same way.
+- **Search** — the session list search matches the test name.
+
+Without the annotation the card has no *Test* row and the table cell stays empty.
 
 ### Example
 
@@ -141,6 +155,13 @@ Turning VNC off for one Selenium session:
 ```json
 {"capabilities": {"alwaysMatch": {"browserName": "chrome",
   "selenosis:options": {"annotations": {"selenosis.io/session.vnc": "false"}}}}}
+```
+
+Naming a Selenium session after its test:
+
+```json
+{"capabilities": {"alwaysMatch": {"browserName": "chrome",
+  "selenosis:options": {"annotations": {"selenosis.io/session.testname": "checkout - test_pay[chrome]"}}}}}
 ```
 
 ---

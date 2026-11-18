@@ -1147,7 +1147,7 @@ func TestStoreSessionKeepsTestName(t *testing.T) {
 	if !ok {
 		t.Fatalf("session was not stored")
 	}
-	if sess.Name != "mpqa - test_example[chrome]" {
-		t.Fatalf("unexpected name: %#v", sess.Name)
+	if sess.TestName != "mpqa - test_example[chrome]" {
+		t.Fatalf("unexpected name: %#v", sess.TestName)
 	}
 }
