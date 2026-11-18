@@ -501,7 +501,7 @@ describe("Dashboard vnc availability", () => {
 });
 
 describe("Dashboard table view", () => {
-  const named = { ...session("b-1", "selenium"), name: "checkout smoke" };
+  const named = { ...session("b-1", "selenium"), testName: "checkout smoke" };
 
   it("shows the test name as a details row on the card", async () => {
     mockStatus([], [named]);
@@ -510,6 +510,25 @@ describe("Dashboard table view", () => {
 
     expect(screen.getByText("Test")).toBeInTheDocument();
     expect(screen.getByText("checkout smoke")).toBeInTheDocument();
+  });
+
+  const detailLabels = () =>
+    [...document.querySelectorAll(".browser-card .detail-label")].map(el => el.textContent);
+
+  it("orders card details as Session ID, Test, Status, Started", async () => {
+    mockStatus([], [named]);
+    renderDashboard();
+    await screen.findByText("b-1");
+
+    expect(detailLabels()).toEqual(["Session ID", "Test", "Status", "Started"]);
+  });
+
+  it("skips the Test row on a card without a test name", async () => {
+    mockStatus([], [session("b-1", "selenium")]);
+    renderDashboard();
+    await screen.findByText("b-1");
+
+    expect(detailLabels()).toEqual(["Session ID", "Status", "Started"]);
   });
 
   it("switches to a table with the expected columns", async () => {
@@ -528,6 +547,16 @@ describe("Dashboard table view", () => {
     expect(screen.getByText("checkout smoke")).toBeInTheDocument();
   });
 
+  it("filters by test name", async () => {
+    mockStatus([], [named, session("b-2", "selenium")]);
+    renderDashboard();
+    await screen.findByText("b-1");
+
+    await userEvent.type(screen.getByPlaceholderText(/Search by test name/), "smoke");
+    const ids = [...document.querySelectorAll(".browser-uuid")].map(el => el.textContent);
+    expect(ids).toEqual(["b-1"]);
+  });
+
   it("filters by browser id and returns to cards", async () => {
     mockStatus([], [session("b-1", "selenium"), session("b-2", "selenium")]);
     renderDashboard();
@@ -543,14 +572,71 @@ describe("Dashboard table view", () => {
 });
 
 describe("Dashboard manual sessions in table", () => {
-  it("marks a manually started session in the name column", async () => {
+  it("marks a manually started session right before CONNECT", async () => {
     mockStatus([], [runningSession]);
     renderDashboard();
     await screen.findByText("b-1");
 
     await userEvent.click(screen.getByRole("button", { name: "Table" }));
 
-    expect(document.querySelector(".session-table .manual-badge-label")).not.toBeNull();
-    expect(document.querySelector(".session-table .manual-badge-delete")).not.toBeNull();
+    const idCell = document.querySelector(".session-table .cell-id");
+    expect(idCell?.textContent).toBe("b-1");
+    expect(idCell?.querySelector(".manual-badge-wrapper")).toBeNull();
+
+    const actions = document.querySelector(".session-table .cell-actions");
+    expect(actions?.querySelector(".manual-badge-label")).not.toBeNull();
+    expect(actions?.querySelector(".manual-badge-delete")).not.toBeNull();
+    expect(actions?.lastElementChild).toHaveTextContent("CONNECT");
+  });
+
+  it("deletes a manual session from the table badge", async () => {
+    mockStatus([], [runningSession]);
+    renderDashboard();
+    await screen.findByText("b-1");
+
+    await userEvent.click(screen.getByRole("button", { name: "Table" }));
+    await userEvent.click(screen.getByRole("button", { name: "delete" }));
+
+    await waitFor(() => {
+      const call = (global.fetch as any).mock.calls.find((c: any[]) => c[1]?.method === "DELETE");
+      expect(call[0]).toBe("/api/v1/browsers/b-1");
+    });
+  });
+});
+
+describe("Dashboard session type in table", () => {
+  const mixed = [session("b-sel", "selenium"), session("b-pw", "playwright")];
+  const rowIds = () =>
+    [...document.querySelectorAll(".session-table .cell-id")].map(el => el.textContent);
+
+  it("renders the session type as the card badge", async () => {
+    mockStatus([], mixed);
+    renderDashboard();
+    await screen.findByText("b-sel");
+
+    await userEvent.click(screen.getByRole("button", { name: "Table" }));
+
+    const badge = screen.getByRole("button", { name: "playwright" });
+    expect(badge).toHaveClass("session-type-badge", "session-type-badge--playwright");
+    expect(badge).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("filters rows by type and keeps the filter for the cards", async () => {
+    mockStatus([], mixed);
+    renderDashboard();
+    await screen.findByText("b-sel");
+
+    await userEvent.click(screen.getByRole("button", { name: "Table" }));
+    await userEvent.click(screen.getByRole("button", { name: "playwright" }));
+
+    expect(rowIds()).toEqual(["b-pw"]);
+    expect(screen.getByRole("button", { name: "playwright" })).toHaveAttribute("aria-pressed", "true");
+
+    await userEvent.click(screen.getByRole("button", { name: "Cards" }));
+    expect(cardIds()).toEqual(["b-pw"]);
+
+    await userEvent.click(screen.getByRole("button", { name: "Table" }));
+    await userEvent.click(screen.getByRole("button", { name: "playwright" }));
+    expect(rowIds()).toHaveLength(2);
   });
 });
